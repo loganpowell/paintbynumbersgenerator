@@ -30,7 +30,7 @@ jobs:
       - run: tsc
         working-directory: ./src-cli
         name: "Build cli to javascript"
-      - run: pkg .
+      - run: pkg . --output paint-by-numbers-generator-win.exe
         name: "Package cli to single executable"
 
       - run: mkdir "out"
