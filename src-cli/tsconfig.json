@@ -7,11 +7,13 @@
         "strictNullChecks": true,
         "removeComments": false,
         "sourceMap": true,
-        "target": "es5",
+        "target": "es2020",
         "lib": [
             "dom",
-            "es2015",
-            "es2015.promise"
+            "es2020"
         ],
+        "types": ["node"],
+        "esModuleInterop": true,
+        "skipLibCheck": true
     }
 }

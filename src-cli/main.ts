@@ -1,6 +1,6 @@
 import * as canvas from "canvas";
 import * as fs from "fs";
-import * as minimist from "minimist";
+import minimist from "minimist";
 import * as path from "path";
 import * as process from "process";
 import { ColorReducer } from "../src/colorreductionmanagement";
@@ -98,12 +98,12 @@ async function main() {
     ctxKmeans.fillRect(0, 0, cKmeans.width, cKmeans.height);
 
     const kmeansImgData = ctxKmeans.getImageData(0, 0, cKmeans.width, cKmeans.height);
-    await ColorReducer.applyKMeansClustering(imgData, kmeansImgData, ctx, settings, (kmeans) => {
+    await ColorReducer.applyKMeansClustering(imgData as unknown as ImageData, kmeansImgData as unknown as ImageData, ctx as unknown as CanvasRenderingContext2D, settings, (kmeans) => {
         const progress = (100 - (kmeans.currentDeltaDistanceDifference > 100 ? 100 : kmeans.currentDeltaDistanceDifference)) / 100;
         ctxKmeans.putImageData(kmeansImgData, 0, 0);
     });
 
-    const colormapResult = ColorReducer.createColorMap(kmeansImgData);
+    const colormapResult = ColorReducer.createColorMap(kmeansImgData as unknown as ImageData);
 
     let facetResult = new FacetResult();
     if (typeof settings.narrowPixelStripCleanupRuns === "undefined" || settings.narrowPixelStripCleanupRuns === 0) {

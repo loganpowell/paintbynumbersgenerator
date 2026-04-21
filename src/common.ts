@@ -9,7 +9,7 @@ export async function delay(ms: number) {
     if (typeof window !== "undefined") {
         return new Promise((exec) => (<any> window).setTimeout(exec, ms));
     } else {
-        return new Promise((exec) => exec());
+        return new Promise<void>((exec) => exec());
     }
 }
 

@@ -1,7 +1,7 @@
 /**
  * Facet management from the process, anything from construction, reduction and border tracing etc.
  */
-import { FacetBoundarySegment } from "./FacetBorderSegmenter";
+import { FacetBoundarySegment } from "./facetBorderSegmenter";
 import { BoundingBox } from "./structs/boundingbox";
 import { Point } from "./structs/point";
 import { Uint32Array2D } from "./structs/typedarrays";
