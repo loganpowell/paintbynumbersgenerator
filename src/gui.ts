@@ -98,6 +98,7 @@ export function parseSettings(): Settings {
   settings.resizeImageIfTooLarge = $("#chkResizeImage").prop("checked");
   settings.resizeImageWidth = parseInt($("#txtResizeWidth").val() + "");
   settings.resizeImageHeight = parseInt($("#txtResizeHeight").val() + "");
+  settings.sortPaletteByLuminance = $("#chkSortPalette").prop("checked");
 
   const restrictedColorLines = (
     $("#txtKMeansColorRestrictions").val() + ""

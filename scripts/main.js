@@ -295,6 +295,7 @@ define("settings", ["require", "exports"], function (require, exports) {
             this.resizeImageIfTooLarge = true;
             this.resizeImageWidth = 1024;
             this.resizeImageHeight = 1024;
+            this.sortPaletteByLuminance = false;
             this.randomSeed = new Date().getTime();
         }
     }
@@ -569,6 +570,32 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
                         outputImgData.data[dataOffset++] = rgb[1];
                         outputImgData.data[dataOffset++] = rgb[2];
                     }
+                }
+            }
+        }
+        /**
+         * Sorts the color palette by perceptual luminance (dark → light, i.e. low L* first)
+         * and remaps all pixel indices in imgColorIndices to match the new order.
+         * This gives stable, human-readable facet numbers where darker colors always
+         * get a lower index regardless of K-means initialisation order.
+         */
+        static sortColorMapByLuminance(result) {
+            // Build sorted order: pair each color with its original index, sort by L*
+            const indexed = result.colorsByIndex.map((rgb, i) => ({
+                i,
+                rgb,
+                l: (0, colorconversion_1.rgb2lab)(rgb)[0], // L* component (0 = black, 100 = white)
+            }));
+            indexed.sort((a, b) => a.l - b.l); // dark first
+            // Build old→new index remap
+            const remap = new Uint16Array(indexed.length);
+            indexed.forEach((entry, newIdx) => { remap[entry.i] = newIdx; });
+            // Reorder colorsByIndex in place
+            result.colorsByIndex = indexed.map(e => e.rgb);
+            // Remap every pixel
+            for (let j = 0; j < result.height; j++) {
+                for (let i = 0; i < result.width; i++) {
+                    result.imgColorIndices.set(i, j, remap[result.imgColorIndices.get(i, j)]);
                 }
             }
         }
@@ -2743,6 +2770,11 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                 let colormapResult = new colorreductionmanagement_2.ColorMapResult();
                 // build color map
                 colormapResult = colorreductionmanagement_2.ColorReducer.createColorMap(kmeansImgData, settings);
+                // optionally sort palette by luminance so facet numbers are stable and
+                // human-readable (darker colors → lower index)
+                if (settings.sortPaletteByLuminance) {
+                    colorreductionmanagement_2.ColorReducer.sortColorMapByLuminance(colormapResult);
+                }
                 if (settings.narrowPixelStripCleanupRuns === 0) {
                     // facet building
                     facetResult = yield GUIProcessManager.processFacetBuilding(colormapResult, cancellationToken);
@@ -3270,6 +3302,7 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
         settings.resizeImageIfTooLarge = $("#chkResizeImage").prop("checked");
         settings.resizeImageWidth = parseInt($("#txtResizeWidth").val() + "");
         settings.resizeImageHeight = parseInt($("#txtResizeHeight").val() + "");
+        settings.sortPaletteByLuminance = $("#chkSortPalette").prop("checked");
         const restrictedColorLines = ($("#txtKMeansColorRestrictions").val() + "").split("\n");
         for (const line of restrictedColorLines) {
             const tline = line.trim();
