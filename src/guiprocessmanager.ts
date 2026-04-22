@@ -19,73 +19,6 @@ export class ProcessResult {
   public colorsByIndex!: RGB[];
 }
 
-// Cached TTF data URI (fetch once per page load) — exported so downloadSVG can embed it
-export let cachedTTFDataUri: string | null = null;
-// Raw font buffer — exported so downloadSVG can convert text to paths via opentype.js
-export let cachedFontBuffer: ArrayBuffer | null = null;
-// Whether CNCFont has been successfully registered with document.fonts
-let cncFontLoaded = false;
-// The CSS font-family name currently active
-let activeFontFamily = "Tahoma";
-
-/**
- * Loads and registers the selected label font for browser preview and SVG export.
- * Call this once before createSVG whenever the font selection changes.
- * Returns the CSS font-family name to use in SVG text elements.
- */
-export async function ensureLabelFont(labelFont: string): Promise<string> {
-  if (labelFont !== "ttf") {
-    activeFontFamily = "Tahoma";
-    return activeFontFamily;
-  }
-
-  activeFontFamily = "CNCFont";
-
-  // Only fetch + register once per page load
-  if (cncFontLoaded) return activeFontFamily;
-
-  try {
-    if (!cachedTTFDataUri) {
-      console.log("[font] Fetching TTF...");
-      const resp = await fetch("fonts/Znikoslsvginot8-GOB3y.ttf");
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const buffer = await resp.arrayBuffer();
-      cachedFontBuffer = buffer; // keep raw buffer for opentype.js path conversion
-      // Chunked conversion avoids call-stack overflow on large font files
-      const bytes = new Uint8Array(buffer);
-      const chunkSize = 0x8000;
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i += chunkSize)
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-      cachedTTFDataUri = `data:font/truetype;base64,${btoa(binary)}`;
-      console.log(`[font] TTF cached (${bytes.byteLength} bytes)`);
-    }
-
-    // Register with FontFace API so Chrome renders it in inline SVG
-    const face = new FontFace(activeFontFamily, `url('${cachedTTFDataUri}')`);
-    await face.load();
-    (document.fonts as any).add(face);
-    console.log("[font] FontFace registered:", activeFontFamily);
-
-    // Inject a <style> @font-face into <head> so exported SVG is self-contained
-    let headStyle = document.getElementById(
-      "cncFontFaceStyle",
-    ) as HTMLStyleElement | null;
-    if (!headStyle) {
-      headStyle = document.createElement("style") as HTMLStyleElement;
-      headStyle.id = "cncFontFaceStyle";
-      document.head.appendChild(headStyle);
-    }
-    headStyle.textContent = `@font-face { font-family: '${activeFontFamily}'; src: url('${cachedTTFDataUri}') format('truetype'); }`;
-
-    cncFontLoaded = true;
-  } catch (e) {
-    console.warn("[font] Could not load TTF font, falling back to Tahoma:", e);
-    activeFontFamily = "Tahoma";
-  }
-  return activeFontFamily;
-}
-
 /**
  *  Manages the GUI states & processes the image step by step
  */
@@ -535,18 +468,12 @@ export class GUIProcessManager {
     fontColor: string = "black",
     fontSizeMin: number = 6,
     fontSizeMax: number = 100,
-    labelFont: string = "standard",
-    fontFamilyName: string = "Tahoma",
     onUpdate: ((progress: number) => void) | null = null,
   ) {
     const xmlns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(xmlns, "svg");
     svg.setAttribute("width", sizeMultiplier * facetResult.width + "");
     svg.setAttribute("height", sizeMultiplier * facetResult.height + "");
-    // Note: @font-face is NOT embedded here — the FontFace API registration
-    // (done in ensureLabelFont) is sufficient for browser preview and avoids
-    // Chrome stalling on a re-parse of the embedded 386 KB data URI.
-    // For SVG export, downloadSVG() injects the <defs> block before serialising.
 
     let count = 0;
     for (const f of facetResult.facets) {
@@ -656,7 +583,7 @@ export class GUIProcessManager {
         // so I don't know why you would hide them
         if (addColorLabels) {
           const txt = document.createElementNS(xmlns, "text");
-          txt.setAttribute("font-family", fontFamilyName);
+          txt.setAttribute("font-family", "Tahoma");
           const nrOfDigits = (f.color + "").length;
           // fontSize is a relative weight (0–100). Scale it against the
           // label bounding box so it's proportional to available space.

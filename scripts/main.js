@@ -2758,73 +2758,10 @@ define("facetLabelPlacer", ["require", "exports", "common", "lib/polylabel", "st
 define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "common", "facetBorderSegmenter", "facetBorderTracer", "facetCreator", "facetLabelPlacer", "facetmanagement", "facetReducer", "gui", "structs/point"], function (require, exports, colorreductionmanagement_2, common_7, facetBorderSegmenter_1, facetBorderTracer_1, facetCreator_3, facetLabelPlacer_1, facetmanagement_4, facetReducer_1, gui_1, point_5) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.GUIProcessManager = exports.cachedFontBuffer = exports.cachedTTFDataUri = exports.ProcessResult = void 0;
-    exports.ensureLabelFont = ensureLabelFont;
+    exports.GUIProcessManager = exports.ProcessResult = void 0;
     class ProcessResult {
     }
     exports.ProcessResult = ProcessResult;
-    // Cached TTF data URI (fetch once per page load) — exported so downloadSVG can embed it
-    exports.cachedTTFDataUri = null;
-    // Raw font buffer — exported so downloadSVG can convert text to paths via opentype.js
-    exports.cachedFontBuffer = null;
-    // Whether CNCFont has been successfully registered with document.fonts
-    let cncFontLoaded = false;
-    // The CSS font-family name currently active
-    let activeFontFamily = "Tahoma";
-    /**
-     * Loads and registers the selected label font for browser preview and SVG export.
-     * Call this once before createSVG whenever the font selection changes.
-     * Returns the CSS font-family name to use in SVG text elements.
-     */
-    function ensureLabelFont(labelFont) {
-        return __awaiter(this, void 0, void 0, function* () {
-            if (labelFont !== "ttf") {
-                activeFontFamily = "Tahoma";
-                return activeFontFamily;
-            }
-            activeFontFamily = "CNCFont";
-            // Only fetch + register once per page load
-            if (cncFontLoaded)
-                return activeFontFamily;
-            try {
-                if (!exports.cachedTTFDataUri) {
-                    console.log("[font] Fetching TTF...");
-                    const resp = yield fetch("fonts/Znikoslsvginot8-GOB3y.ttf");
-                    if (!resp.ok)
-                        throw new Error(`HTTP ${resp.status}`);
-                    const buffer = yield resp.arrayBuffer();
-                    exports.cachedFontBuffer = buffer; // keep raw buffer for opentype.js path conversion
-                    // Chunked conversion avoids call-stack overflow on large font files
-                    const bytes = new Uint8Array(buffer);
-                    const chunkSize = 0x8000;
-                    let binary = "";
-                    for (let i = 0; i < bytes.byteLength; i += chunkSize)
-                        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-                    exports.cachedTTFDataUri = `data:font/truetype;base64,${btoa(binary)}`;
-                    console.log(`[font] TTF cached (${bytes.byteLength} bytes)`);
-                }
-                // Register with FontFace API so Chrome renders it in inline SVG
-                const face = new FontFace(activeFontFamily, `url('${exports.cachedTTFDataUri}')`);
-                yield face.load();
-                document.fonts.add(face);
-                console.log("[font] FontFace registered:", activeFontFamily);
-                // Inject a <style> @font-face into <head> so exported SVG is self-contained
-                let headStyle = document.getElementById("cncFontFaceStyle");
-                if (!headStyle) {
-                    headStyle = document.createElement("style");
-                    headStyle.id = "cncFontFaceStyle";
-                    document.head.appendChild(headStyle);
-                }
-                headStyle.textContent = `@font-face { font-family: '${activeFontFamily}'; src: url('${exports.cachedTTFDataUri}') format('truetype'); }`;
-                cncFontLoaded = true;
-            }
-            catch (e) {
-                console.warn("[font] Could not load TTF font, falling back to Tahoma:", e);
-                activeFontFamily = "Tahoma";
-            }
-            return activeFontFamily;
-        });
-    }
     /**
      *  Manages the GUI states & processes the image step by step
      */
@@ -3092,15 +3029,11 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
          *  Creates a vector based SVG image of the facets with the given configuration
          */
         static createSVG(facetResult_1, colorsByIndex_1, sizeMultiplier_1, fill_2, stroke_1, addColorLabels_1) {
-            return __awaiter(this, arguments, void 0, function* (facetResult, colorsByIndex, sizeMultiplier, fill, stroke, addColorLabels, fontSize = 50, fontColor = "black", fontSizeMin = 6, fontSizeMax = 100, labelFont = "standard", fontFamilyName = "Tahoma", onUpdate = null) {
+            return __awaiter(this, arguments, void 0, function* (facetResult, colorsByIndex, sizeMultiplier, fill, stroke, addColorLabels, fontSize = 50, fontColor = "black", fontSizeMin = 6, fontSizeMax = 100, onUpdate = null) {
                 const xmlns = "http://www.w3.org/2000/svg";
                 const svg = document.createElementNS(xmlns, "svg");
                 svg.setAttribute("width", sizeMultiplier * facetResult.width + "");
                 svg.setAttribute("height", sizeMultiplier * facetResult.height + "");
-                // Note: @font-face is NOT embedded here — the FontFace API registration
-                // (done in ensureLabelFont) is sufficient for browser preview and avoids
-                // Chrome stalling on a re-parse of the embedded 386 KB data URI.
-                // For SVG export, downloadSVG() injects the <defs> block before serialising.
                 let count = 0;
                 for (const f of facetResult.facets) {
                     if (f != null && f.borderSegments.length > 0) {
@@ -3195,7 +3128,7 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                         // so I don't know why you would hide them
                         if (addColorLabels) {
                             const txt = document.createElementNS(xmlns, "text");
-                            txt.setAttribute("font-family", fontFamilyName);
+                            txt.setAttribute("font-family", "Tahoma");
                             const nrOfDigits = (f.color + "").length;
                             // fontSize is a relative weight (0–100). Scale it against the
                             // label bounding box so it's proportional to available space.
@@ -3498,14 +3431,11 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
                     const fontSize = parseInt($("#txtLabelFontSize").val() + "");
                     const fontSizeMin = parseInt($("#txtLabelFontSizeMin").val() + "") || 6;
                     const fontSizeMax = parseInt($("#txtLabelFontSizeMax").val() + "") || Infinity;
-                    const labelFont = document.getElementById("selLabelFont").value;
                     const fontColor = $("#txtLabelFontColor").val() + "";
-                    // Load/register the font before rendering so Chrome can apply it
-                    const fontFamilyName = yield (0, guiprocessmanager_1.ensureLabelFont)(labelFont);
                     $("#statusSVGGenerate").css("width", "0%");
                     $(".status.SVGGenerate").removeClass("complete");
                     $(".status.SVGGenerate").addClass("active");
-                    const svg = yield guiprocessmanager_1.GUIProcessManager.createSVG(processResult.facetResult, processResult.colorsByIndex, sizeMultiplier, fill, stroke, showLabels, fontSize, fontColor, fontSizeMin, fontSizeMax, labelFont, fontFamilyName, (progress) => {
+                    const svg = yield guiprocessmanager_1.GUIProcessManager.createSVG(processResult.facetResult, processResult.colorsByIndex, sizeMultiplier, fill, stroke, showLabels, fontSize, fontColor, fontSizeMin, fontSizeMax, (progress) => {
                         if (cancellationToken.isCancelled) {
                             throw new Error("Cancelled");
                         }
@@ -3599,54 +3529,100 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
         });
     }
     /**
-     * Replaces all <text> elements in svgEl with equivalent <path> elements using
-     * opentype.js glyph outlines. This makes the SVG fully self-contained and
-     * compatible with Inkscape / CNC software that can't embed or substitute fonts.
-     *
-     * Assumes opentype.js is loaded as a global (window.opentype).
+     * Cached parsed Hershey glyph data (fetched once per page load).
+     * Maps a unicode character to { d: path data string, advanceWidth: number }.
      */
-    function textLabelsToPaths(svgEl, fontBuffer) {
-        var _a, _b, _c, _d, _e, _f;
-        const opentype = window.opentype;
-        if (!opentype) {
-            console.warn("[font] opentype.js not available — skipping path conversion");
-            return;
-        }
-        const font = opentype.parse(fontBuffer);
-        const unitsPerEm = font.unitsPerEm;
-        // sCapHeight gives the height of capital letters in font design units.
-        // Fallback to ascender if the OS/2 table doesn't have it.
-        const capHeightUnits = ((_a = font.tables.os2) === null || _a === void 0 ? void 0 : _a.sCapHeight) || font.ascender || unitsPerEm * 0.7;
-        const xmlns = "http://www.w3.org/2000/svg";
-        const textEls = Array.from(svgEl.querySelectorAll("text"));
-        for (const textEl of textEls) {
-            const text = (_b = textEl.textContent) !== null && _b !== void 0 ? _b : "";
-            if (!text)
-                continue;
-            const cx = parseFloat((_c = textEl.getAttribute("x")) !== null && _c !== void 0 ? _c : "0");
-            const cy = parseFloat((_d = textEl.getAttribute("y")) !== null && _d !== void 0 ? _d : "0");
-            const fontSize = parseFloat((_e = textEl.getAttribute("font-size")) !== null && _e !== void 0 ? _e : "12");
-            const fill = (_f = textEl.getAttribute("fill")) !== null && _f !== void 0 ? _f : "black";
-            // opentype positions glyphs with y at the baseline (bottom of cap height).
-            // Our SVG text uses text-anchor:middle + dominant-baseline:middle, so
-            // cx/cy is the visual centre of the label. Convert to opentype's origin:
-            //   • x: subtract half the total advance width  (centre → left-edge)
-            //   • y: add half the cap height in px          (centre → baseline)
-            const advanceWidth = font.getAdvanceWidth(text, fontSize);
-            const capHeightPx = (capHeightUnits / unitsPerEm) * fontSize;
-            const ox = cx - advanceWidth / 2;
-            const oy = cy + capHeightPx / 2;
-            const path = font.getPath(text, ox, oy, fontSize);
-            const pathData = path.toPathData(2);
-            const pathEl = document.createElementNS(xmlns, "path");
-            pathEl.setAttribute("d", pathData);
-            pathEl.setAttribute("fill", fill);
-            // Preserve any transform on the text element
-            const transform = textEl.getAttribute("transform");
-            if (transform)
-                pathEl.setAttribute("transform", transform);
-            textEl.parentNode.replaceChild(pathEl, textEl);
-        }
+    let hersheyGlyphs = null;
+    const HERSHEY_UNITS_PER_EM = 1000;
+    const HERSHEY_CAP_HEIGHT = 500; // cap-height from font-face metadata
+    function ensureHersheyGlyphs() {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (hersheyGlyphs)
+                return hersheyGlyphs;
+            const resp = yield fetch("fonts/HersheySans1.svg");
+            if (!resp.ok)
+                throw new Error(`Failed to fetch HersheySans1.svg: HTTP ${resp.status}`);
+            const text = yield resp.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(text, "image/svg+xml");
+            hersheyGlyphs = new Map();
+            for (const glyph of Array.from(doc.querySelectorAll("glyph"))) {
+                const unicode = glyph.getAttribute("unicode");
+                const d = glyph.getAttribute("d");
+                const advW = glyph.getAttribute("horiz-adv-x");
+                if (unicode && d && advW) {
+                    hersheyGlyphs.set(unicode, {
+                        d,
+                        advanceWidth: parseFloat(advW),
+                    });
+                }
+            }
+            return hersheyGlyphs;
+        });
+    }
+    /**
+     * Replaces all <text> elements in svgEl with Hershey single-stroke <path>
+     * elements. Paths use fill="none" + stroke, making them true open-path output
+     * suitable for CNC plotters, laser engravers, and Inkscape.
+     */
+    function textLabelsToHersheyPaths(svgEl) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c, _d, _e;
+            const glyphs = yield ensureHersheyGlyphs();
+            const xmlns = "http://www.w3.org/2000/svg";
+            const scale_factor = 1 / HERSHEY_UNITS_PER_EM;
+            // cap height in normalised units (0..1)
+            const capNorm = HERSHEY_CAP_HEIGHT * scale_factor;
+            const textEls = Array.from(svgEl.querySelectorAll("text"));
+            for (const textEl of textEls) {
+                const text = (_a = textEl.textContent) !== null && _a !== void 0 ? _a : "";
+                if (!text)
+                    continue;
+                const cx = parseFloat((_b = textEl.getAttribute("x")) !== null && _b !== void 0 ? _b : "0");
+                const cy = parseFloat((_c = textEl.getAttribute("y")) !== null && _c !== void 0 ? _c : "0");
+                const fontSize = parseFloat((_d = textEl.getAttribute("font-size")) !== null && _d !== void 0 ? _d : "12");
+                const strokeColor = (_e = textEl.getAttribute("fill")) !== null && _e !== void 0 ? _e : "black";
+                // Stroke width scales with font size: ~8% of em gives good weight at all
+                // label sizes without obscuring the numeral. Floor at 0.5px for tiny facets.
+                const strokeWidth = Math.max(3, fontSize);
+                // Compute total advance width in SVG pixels so we can centre the string
+                let totalAdvance = 0;
+                for (const ch of text) {
+                    const g = glyphs.get(ch);
+                    totalAdvance += g
+                        ? g.advanceWidth * scale_factor * fontSize
+                        : fontSize * 0.6;
+                }
+                // SVG text uses dominant-baseline:middle, so cy is the vertical centre.
+                // The Hershey glyph coordinate system has y=0 at the baseline, y increases UP.
+                // Cap-height centre = baseline + HERSHEY_CAP_HEIGHT/2 (in font units).
+                // In SVG (y-down): baseline_y = cy + (capNorm * fontSize) / 2
+                const baselineSvgY = cy + (capNorm * fontSize) / 2;
+                let curX = cx - totalAdvance / 2;
+                const g = document.createElementNS(xmlns, "g");
+                for (const ch of text) {
+                    const glyph = glyphs.get(ch);
+                    if (!glyph) {
+                        curX += fontSize * 0.6;
+                        continue;
+                    }
+                    const advPx = glyph.advanceWidth * scale_factor * fontSize;
+                    const s = scale_factor * fontSize;
+                    const pathEl = document.createElementNS(xmlns, "path");
+                    pathEl.setAttribute("d", glyph.d);
+                    pathEl.setAttribute("fill", "none");
+                    pathEl.setAttribute("stroke", strokeColor);
+                    pathEl.setAttribute("stroke-width", strokeWidth + "");
+                    pathEl.setAttribute("stroke-linecap", "round");
+                    pathEl.setAttribute("stroke-linejoin", "round");
+                    // Translate glyph origin to curX / baselineSvgY, flip Y axis (font Y-up → SVG Y-down)
+                    pathEl.setAttribute("transform", `translate(${curX},${baselineSvgY}) scale(${s},${-s})`);
+                    g.appendChild(pathEl);
+                    curX += advPx;
+                }
+                textEl.parentNode.replaceChild(g, textEl);
+            }
+        });
     }
     function downloadSVG() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -3657,28 +3633,10 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
             if ($("#svgContainer svg").length > 0) {
                 const svgEl = $("#svgContainer svg").get(0);
                 svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-                const labelFont = document.getElementById("selLabelFont").value;
                 const renderAsPaths = document.getElementById("chkRenderLabelsAsPaths").checked;
-                if (labelFont === "ttf" && renderAsPaths && guiprocessmanager_1.cachedFontBuffer) {
-                    // Convert <text> nodes to <path> outlines — no font embedding needed
-                    textLabelsToPaths(svgEl, guiprocessmanager_1.cachedFontBuffer);
-                }
-                else if (labelFont === "ttf" && guiprocessmanager_1.cachedTTFDataUri) {
-                    // Inject @font-face into <defs> so the downloaded SVG is self-contained
-                    const xmlns = "http://www.w3.org/2000/svg";
-                    const fontCss = `@font-face { font-family: 'CNCFont'; src: url('${guiprocessmanager_1.cachedTTFDataUri}') format('truetype'); }`;
-                    let defs = svgEl.querySelector("defs");
-                    if (!defs) {
-                        defs = document.createElementNS(xmlns, "defs");
-                        svgEl.insertBefore(defs, svgEl.firstChild);
-                    }
-                    let styleEl = defs.querySelector("style");
-                    if (!styleEl) {
-                        styleEl = document.createElementNS(xmlns, "style");
-                        styleEl.setAttribute("type", "text/css");
-                        defs.appendChild(styleEl);
-                    }
-                    styleEl.textContent = fontCss;
+                if (renderAsPaths) {
+                    // Convert <text> nodes to Hershey single-stroke <path> outlines
+                    yield textLabelsToHersheyPaths(svgEl);
                 }
                 const serializer = new XMLSerializer();
                 const svgData = serializer.serializeToString(svgEl);
