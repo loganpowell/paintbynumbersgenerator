@@ -18,13 +18,34 @@ export class ColorMapResult {
 export class ColorReducer {
 
     /**
-     *  Creates a map of the various colors used
+     *  Creates a map of the various colors used.
+     *  When settings are provided and kMeansColorRestrictions is non-empty the
+     *  restriction colors are pre-seeded into the map (in input order) so that
+     *  their indices are stable across runs regardless of K-means randomness.
      */
-    public static createColorMap(kmeansImgData: ImageData) {
+    public static createColorMap(kmeansImgData: ImageData, settings?: Settings) {
         const imgColorIndices = new Uint8Array2D(kmeansImgData.width, kmeansImgData.height);
         let colorIndex = 0;
         const colors: IMap<number> = {};
         const colorsByIndex: RGB[] = [];
+
+        // Pre-seed restriction colors so they always receive the same stable index
+        if (settings && settings.kMeansColorRestrictions.length > 0) {
+            for (const restriction of settings.kMeansColorRestrictions) {
+                let rgb: RGB;
+                if (typeof restriction === "string") {
+                    rgb = settings.colorAliases[restriction];
+                } else {
+                    rgb = restriction;
+                }
+                const key = rgb[0] + "," + rgb[1] + "," + rgb[2];
+                if (typeof colors[key] === "undefined") {
+                    colors[key] = colorIndex;
+                    colorsByIndex.push(rgb);
+                    colorIndex++;
+                }
+            }
+        }
 
         let idx = 0;
         for (let j: number = 0; j < kmeansImgData.height; j++) {

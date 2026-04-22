@@ -68,7 +68,7 @@ export class GUIProcessManager {
         let colormapResult: ColorMapResult = new ColorMapResult();
 
         // build color map
-        colormapResult = ColorReducer.createColorMap(kmeansImgData);
+        colormapResult = ColorReducer.createColorMap(kmeansImgData, settings);
 
         if (settings.narrowPixelStripCleanupRuns === 0) {
             // facet building
