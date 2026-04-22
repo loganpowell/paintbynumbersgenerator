@@ -9,295 +9,389 @@ import { Uint8Array2D } from "./structs/typedarrays";
 import { Random } from "./random";
 
 export class ColorMapResult {
-    public imgColorIndices!: Uint8Array2D;
-    public colorsByIndex!: RGB[];
-    public width!: number;
-    public height!: number;
+  public imgColorIndices!: Uint8Array2D;
+  public colorsByIndex!: RGB[];
+  public width!: number;
+  public height!: number;
 }
 
 export class ColorReducer {
+  /**
+   *  Creates a map of the various colors used.
+   *  When settings are provided and kMeansColorRestrictions is non-empty the
+   *  restriction colors are pre-seeded into the map (in input order) so that
+   *  their indices are stable across runs regardless of K-means randomness.
+   */
+  public static createColorMap(kmeansImgData: ImageData, settings?: Settings) {
+    const imgColorIndices = new Uint8Array2D(
+      kmeansImgData.width,
+      kmeansImgData.height,
+    );
+    let colorIndex = 0;
+    const colors: IMap<number> = {};
+    const colorsByIndex: RGB[] = [];
 
-    /**
-     *  Creates a map of the various colors used.
-     *  When settings are provided and kMeansColorRestrictions is non-empty the
-     *  restriction colors are pre-seeded into the map (in input order) so that
-     *  their indices are stable across runs regardless of K-means randomness.
-     */
-    public static createColorMap(kmeansImgData: ImageData, settings?: Settings) {
-        const imgColorIndices = new Uint8Array2D(kmeansImgData.width, kmeansImgData.height);
-        let colorIndex = 0;
-        const colors: IMap<number> = {};
-        const colorsByIndex: RGB[] = [];
-
-        // Pre-seed restriction colors so they always receive the same stable index
-        if (settings && settings.kMeansColorRestrictions.length > 0) {
-            for (const restriction of settings.kMeansColorRestrictions) {
-                let rgb: RGB;
-                if (typeof restriction === "string") {
-                    rgb = settings.colorAliases[restriction];
-                } else {
-                    rgb = restriction;
-                }
-                const key = rgb[0] + "," + rgb[1] + "," + rgb[2];
-                if (typeof colors[key] === "undefined") {
-                    colors[key] = colorIndex;
-                    colorsByIndex.push(rgb);
-                    colorIndex++;
-                }
-            }
+    // Pre-seed restriction colors so they always receive the same stable index
+    if (settings && settings.kMeansColorRestrictions.length > 0) {
+      for (const restriction of settings.kMeansColorRestrictions) {
+        let rgb: RGB;
+        if (typeof restriction === "string") {
+          rgb = settings.colorAliases[restriction];
+        } else {
+          rgb = restriction;
         }
-
-        let idx = 0;
-        for (let j: number = 0; j < kmeansImgData.height; j++) {
-            for (let i: number = 0; i < kmeansImgData.width; i++) {
-                const r = kmeansImgData.data[idx++];
-                const g = kmeansImgData.data[idx++];
-                const b = kmeansImgData.data[idx++];
-                const a = kmeansImgData.data[idx++];
-                let currentColorIndex;
-                const color = r + "," + g + "," + b;
-                if (typeof colors[color] === "undefined") {
-                    currentColorIndex = colorIndex;
-                    colors[color] = colorIndex;
-                    colorsByIndex.push([r, g, b]);
-                    colorIndex++;
-                } else {
-                    currentColorIndex = colors[color];
-                }
-                imgColorIndices.set(i, j, currentColorIndex);
-            }
+        const key = rgb[0] + "," + rgb[1] + "," + rgb[2];
+        if (typeof colors[key] === "undefined") {
+          colors[key] = colorIndex;
+          colorsByIndex.push(rgb);
+          colorIndex++;
         }
-
-        const result = new ColorMapResult();
-        result.imgColorIndices = imgColorIndices;
-        result.colorsByIndex = colorsByIndex;
-        result.width = kmeansImgData.width;
-        result.height = kmeansImgData.height;
-
-        return result;
+      }
     }
 
-    /**
-     *  Applies K-means clustering on the imgData to reduce the colors to
-     *  k clusters and then output the result to the given outputImgData
-     */
-    public static async applyKMeansClustering(imgData: ImageData, outputImgData: ImageData, ctx: CanvasRenderingContext2D, settings: Settings, onUpdate: ((kmeans: KMeans) => void) | null = null) {
-        const vectors: Vector[] = [];
-        let idx = 0;
-        let vIdx = 0;
-
-        const bitsToChopOff = 2; // r,g,b gets rounded to every 4 values, 0,4,8,...
-
-        // group by color, add points as 1D index to prevent Point object allocation
-        const pointsByColor: IMap<number[]> = {};
-        for (let j: number = 0; j < imgData.height; j++) {
-            for (let i: number = 0; i < imgData.width; i++) {
-                let r = imgData.data[idx++];
-                let g = imgData.data[idx++];
-                let b = imgData.data[idx++];
-                const a = imgData.data[idx++];
-
-                // small performance boost: reduce bitness of colors by chopping off the last bits
-                // this will group more colors with only slight variation in color together, reducing the size of the points
-
-                r = r >> bitsToChopOff << bitsToChopOff;
-                g = g >> bitsToChopOff << bitsToChopOff;
-                b = b >> bitsToChopOff << bitsToChopOff;
-
-                const color = `${r},${g},${b}`;
-                if (!(color in pointsByColor)) {
-                    pointsByColor[color] = [j * imgData.width + i];
-                } else {
-                    pointsByColor[color].push(j * imgData.width + i);
-                }
-            }
+    let idx = 0;
+    for (let j: number = 0; j < kmeansImgData.height; j++) {
+      for (let i: number = 0; i < kmeansImgData.width; i++) {
+        const r = kmeansImgData.data[idx++];
+        const g = kmeansImgData.data[idx++];
+        const b = kmeansImgData.data[idx++];
+        const a = kmeansImgData.data[idx++];
+        let currentColorIndex;
+        const color = r + "," + g + "," + b;
+        if (typeof colors[color] === "undefined") {
+          currentColorIndex = colorIndex;
+          colors[color] = colorIndex;
+          colorsByIndex.push([r, g, b]);
+          colorIndex++;
+        } else {
+          currentColorIndex = colors[color];
         }
+        imgColorIndices.set(i, j, currentColorIndex);
+      }
+    }
 
-        for (const color of Object.keys(pointsByColor)) {
-            const rgb: number[] = color.split(",").map((v) => parseInt(v));
+    const result = new ColorMapResult();
+    result.imgColorIndices = imgColorIndices;
+    result.colorsByIndex = colorsByIndex;
+    result.width = kmeansImgData.width;
+    result.height = kmeansImgData.height;
 
-            // determine vector data based on color space conversion
-            let data: number[];
-            if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.RGB) {
-                data = rgb;
-            } else if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.HSL) {
-                data = rgbToHsl(rgb[0], rgb[1], rgb[2]);
-            } else if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.LAB) {
-                data = rgb2lab(rgb);
-            } else {
-                data = rgb;
-            }
-            // determine the weight (#pointsOfColor / #totalpoints) of each color
-            const weight = pointsByColor[color].length / (imgData.width * imgData.height);
+    return result;
+  }
 
-            const vec = new Vector(data, weight);
-            vec.tag = rgb;
-            vectors[vIdx++] = vec;
+  /**
+   *  Applies K-means clustering on the imgData to reduce the colors to
+   *  k clusters and then output the result to the given outputImgData
+   */
+  public static async applyKMeansClustering(
+    imgData: ImageData,
+    outputImgData: ImageData,
+    ctx: CanvasRenderingContext2D,
+    settings: Settings,
+    onUpdate: ((kmeans: KMeans) => void) | null = null,
+  ) {
+    const vectors: Vector[] = [];
+    let idx = 0;
+    let vIdx = 0;
+
+    const bitsToChopOff = 2; // r,g,b gets rounded to every 4 values, 0,4,8,...
+
+    // group by color, add points as 1D index to prevent Point object allocation
+    const pointsByColor: IMap<number[]> = {};
+    for (let j: number = 0; j < imgData.height; j++) {
+      for (let i: number = 0; i < imgData.width; i++) {
+        let r = imgData.data[idx++];
+        let g = imgData.data[idx++];
+        let b = imgData.data[idx++];
+        const a = imgData.data[idx++];
+
+        // small performance boost: reduce bitness of colors by chopping off the last bits
+        // this will group more colors with only slight variation in color together, reducing the size of the points
+
+        r = (r >> bitsToChopOff) << bitsToChopOff;
+        g = (g >> bitsToChopOff) << bitsToChopOff;
+        b = (b >> bitsToChopOff) << bitsToChopOff;
+
+        const color = `${r},${g},${b}`;
+        if (!(color in pointsByColor)) {
+          pointsByColor[color] = [j * imgData.width + i];
+        } else {
+          pointsByColor[color].push(j * imgData.width + i);
         }
+      }
+    }
 
-        const random = new Random(settings.randomSeed === 0 ? new Date().getTime() : settings.randomSeed);
-        // vectors of all the unique colors are built, time to cluster them
-        const kmeans = new KMeans(vectors, settings.kMeansNrOfClusters, random);
+    for (const color of Object.keys(pointsByColor)) {
+      const rgb: number[] = color.split(",").map((v) => parseInt(v));
 
-        let curTime = new Date().getTime();
+      // determine vector data based on color space conversion
+      let data: number[];
+      if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.RGB) {
+        data = rgb;
+      } else if (
+        settings.kMeansClusteringColorSpace === ClusteringColorSpace.HSL
+      ) {
+        data = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+      } else if (
+        settings.kMeansClusteringColorSpace === ClusteringColorSpace.LAB
+      ) {
+        data = rgb2lab(rgb);
+      } else {
+        data = rgb;
+      }
+      // determine the weight (#pointsOfColor / #totalpoints) of each color
+      const weight =
+        pointsByColor[color].length / (imgData.width * imgData.height);
 
-        kmeans.step();
-        while (kmeans.currentDeltaDistanceDifference > settings.kMeansMinDeltaDifference) {
-            kmeans.step();
+      const vec = new Vector(data, weight);
+      vec.tag = rgb;
+      vectors[vIdx++] = vec;
+    }
 
-            // update GUI every 500ms
-            if (new Date().getTime() - curTime > 500) {
-                curTime = new Date().getTime();
+    const random = new Random(
+      settings.randomSeed === 0 ? new Date().getTime() : settings.randomSeed,
+    );
+    // vectors of all the unique colors are built, time to cluster them
+    const kmeans = new KMeans(vectors, settings.kMeansNrOfClusters, random);
 
-                await delay(0);
-                if (onUpdate != null) {
-                    ColorReducer.updateKmeansOutputImageData(kmeans, settings, pointsByColor, imgData, outputImgData, false);
-                    onUpdate(kmeans);
-                }
-            }
+    let curTime = new Date().getTime();
 
-        }
+    kmeans.step();
+    while (
+      kmeans.currentDeltaDistanceDifference > settings.kMeansMinDeltaDifference
+    ) {
+      kmeans.step();
 
-        // update the output image data (because it will be used for further processing)
-        ColorReducer.updateKmeansOutputImageData(kmeans, settings, pointsByColor, imgData, outputImgData, true);
+      // update GUI every 500ms
+      if (new Date().getTime() - curTime > 500) {
+        curTime = new Date().getTime();
 
+        await delay(0);
         if (onUpdate != null) {
-            onUpdate(kmeans);
+          ColorReducer.updateKmeansOutputImageData(
+            kmeans,
+            settings,
+            pointsByColor,
+            imgData,
+            outputImgData,
+            false,
+          );
+          onUpdate(kmeans);
         }
+      }
     }
 
-    /**
-     *  Updates the image data from the current kmeans centroids and their respective associated colors (vectors)
-     */
-    public static updateKmeansOutputImageData(kmeans: KMeans, settings: Settings, pointsByColor: IMap<number[]>, imgData: ImageData, outputImgData: ImageData, restrictToSpecifiedColors: boolean) {
+    // update the output image data (because it will be used for further processing)
+    ColorReducer.updateKmeansOutputImageData(
+      kmeans,
+      settings,
+      pointsByColor,
+      imgData,
+      outputImgData,
+      true,
+    );
 
-        for (let c: number = 0; c < kmeans.centroids.length; c++) {
-            // for each cluster centroid
-            const centroid = kmeans.centroids[c];
+    if (onUpdate != null) {
+      onUpdate(kmeans);
+    }
+  }
 
-            // points per category are the different unique colors belonging to that cluster
-            for (const v of kmeans.pointsPerCategory[c]) {
+  /**
+   *  Updates the image data from the current kmeans centroids and their respective associated colors (vectors)
+   */
+  public static updateKmeansOutputImageData(
+    kmeans: KMeans,
+    settings: Settings,
+    pointsByColor: IMap<number[]>,
+    imgData: ImageData,
+    outputImgData: ImageData,
+    restrictToSpecifiedColors: boolean,
+  ) {
+    for (let c: number = 0; c < kmeans.centroids.length; c++) {
+      // for each cluster centroid
+      const centroid = kmeans.centroids[c];
 
-                // determine the rgb color value of the cluster centroid
-                let rgb: number[];
-                if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.RGB) {
-                    rgb = centroid.values;
-                } else if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.HSL) {
-                    const hsl = centroid.values;
-                    rgb = hslToRgb(hsl[0], hsl[1], hsl[2]);
-                } else if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.LAB) {
-                    const lab = centroid.values;
-                    rgb = lab2rgb(lab);
-                } else {
-                    rgb = centroid.values;
-                }
+      // points per category are the different unique colors belonging to that cluster
+      for (const v of kmeans.pointsPerCategory[c]) {
+        // determine the rgb color value of the cluster centroid
+        let rgb: number[];
+        if (settings.kMeansClusteringColorSpace === ClusteringColorSpace.RGB) {
+          rgb = centroid.values;
+        } else if (
+          settings.kMeansClusteringColorSpace === ClusteringColorSpace.HSL
+        ) {
+          const hsl = centroid.values;
+          rgb = hslToRgb(hsl[0], hsl[1], hsl[2]);
+        } else if (
+          settings.kMeansClusteringColorSpace === ClusteringColorSpace.LAB
+        ) {
+          const lab = centroid.values;
+          rgb = lab2rgb(lab);
+        } else {
+          rgb = centroid.values;
+        }
 
-                 // remove decimals
-                 rgb = rgb.map(v => Math.floor(v));
+        // remove decimals
+        rgb = rgb.map((v) => Math.floor(v));
 
-                if (restrictToSpecifiedColors) {
-                    if (settings.kMeansColorRestrictions.length > 0) {
-                        // there are color restrictions, for each centroid find the color from the color restrictions that's the closest
-                        let minDistance = Number.MAX_VALUE;
-                        let closestRestrictedColor: RGB | string | null = null;
-                        for (const color of settings.kMeansColorRestrictions) {
-                            // RGB distance is not very good for the human eye perception, convert both to lab and then calculate the distance
-                            const centroidLab = rgb2lab(rgb);
+        if (restrictToSpecifiedColors) {
+          if (settings.kMeansColorRestrictions.length > 0) {
+            // there are color restrictions, for each centroid find the color from the color restrictions that's the closest
+            let minDistance = Number.MAX_VALUE;
+            let closestRestrictedColor: RGB | string | null = null;
+            for (const color of settings.kMeansColorRestrictions) {
+              // RGB distance is not very good for the human eye perception, convert both to lab and then calculate the distance
+              const centroidLab = rgb2lab(rgb);
 
-                            let restrictionLab: number[];
-                            if (typeof color === "string") {
-                                restrictionLab = rgb2lab(settings.colorAliases[color]);
-                            } else {
-                                restrictionLab = rgb2lab(color);
-                            }
+              let restrictionLab: number[];
+              if (typeof color === "string") {
+                restrictionLab = rgb2lab(settings.colorAliases[color]);
+              } else {
+                restrictionLab = rgb2lab(color);
+              }
 
-                            const distance = Math.sqrt((centroidLab[0] - restrictionLab[0]) * (centroidLab[0] - restrictionLab[0]) +
-                                (centroidLab[1] - restrictionLab[1]) * (centroidLab[1] - restrictionLab[1]) +
-                                (centroidLab[2] - restrictionLab[2]) * (centroidLab[2] - restrictionLab[2]));
-                            if (distance < minDistance) {
-                                minDistance = distance;
-                                closestRestrictedColor = color;
-                            }
-                        }
-                        // use this color instead
-                        if (closestRestrictedColor !== null) {
-                            if (typeof closestRestrictedColor === "string") {
-                                rgb = settings.colorAliases[closestRestrictedColor];
-                            } else {
-                                rgb = closestRestrictedColor;
-                            }
-                        }
-                    }
-                }
-
-                let pointRGB: number[] = v.tag;
-
-                // replace all pixels of the old color by the new centroid color
-                const pointColor = `${Math.floor(pointRGB[0])},${Math.floor(pointRGB[1])},${Math.floor(pointRGB[2])}`;
-                for (const pt of pointsByColor[pointColor]) {
-                    const ptx = pt % imgData.width;
-                    const pty = Math.floor(pt / imgData.width);
-                    let dataOffset = (pty * imgData.width + ptx) * 4;
-                    outputImgData.data[dataOffset++] = rgb[0];
-                    outputImgData.data[dataOffset++] = rgb[1];
-                    outputImgData.data[dataOffset++] = rgb[2];
-                }
+              const distance = Math.sqrt(
+                (centroidLab[0] - restrictionLab[0]) *
+                  (centroidLab[0] - restrictionLab[0]) +
+                  (centroidLab[1] - restrictionLab[1]) *
+                    (centroidLab[1] - restrictionLab[1]) +
+                  (centroidLab[2] - restrictionLab[2]) *
+                    (centroidLab[2] - restrictionLab[2]),
+              );
+              if (distance < minDistance) {
+                minDistance = distance;
+                closestRestrictedColor = color;
+              }
             }
-        }
-    }
-
-    /**
-     *  Builds a distance matrix for each color to each other
-     */
-    public static buildColorDistanceMatrix(colorsByIndex: RGB[]) {
-        const colorDistances: number[][] = new Array(colorsByIndex.length);
-        for (let j: number = 0; j < colorsByIndex.length; j++) {
-            colorDistances[j] = new Array(colorDistances.length);
-        }
-        for (let j: number = 0; j < colorsByIndex.length; j++) {
-            for (let i: number = j; i < colorsByIndex.length; i++) {
-                const c1 = colorsByIndex[j];
-                const c2 = colorsByIndex[i];
-                const distance = Math.sqrt((c1[0] - c2[0]) * (c1[0] - c2[0]) +
-                    (c1[1] - c2[1]) * (c1[1] - c2[1]) +
-                    (c1[2] - c2[2]) * (c1[2] - c2[2]));
-                colorDistances[i][j] = distance;
-                colorDistances[j][i] = distance;
+            // use this color instead
+            if (closestRestrictedColor !== null) {
+              if (typeof closestRestrictedColor === "string") {
+                rgb = settings.colorAliases[closestRestrictedColor];
+              } else {
+                rgb = closestRestrictedColor;
+              }
             }
+          }
         }
-        return colorDistances;
-    }
 
-    public static async processNarrowPixelStripCleanup(colormapResult: ColorMapResult) {
-        // build the color distance matrix, which describes the distance of each color to each other
-        const colorDistances: number[][] = ColorReducer.buildColorDistanceMatrix(colormapResult.colorsByIndex);
+        let pointRGB: number[] = v.tag;
 
-        let count = 0;
-        const imgColorIndices = colormapResult.imgColorIndices;
-        for (let j: number = 1; j < colormapResult.height - 1; j++) {
-            for (let i: number = 1; i < colormapResult.width - 1; i++) {
-                const top = imgColorIndices.get(i, j - 1);
-                const bottom = imgColorIndices.get(i, j + 1);
-                const left = imgColorIndices.get(i - 1, j);
-                const right = imgColorIndices.get(i + 1, j);
-                const cur = imgColorIndices.get(i, j);
-                if (cur !== top && cur !== bottom && cur !== left && cur !== right) {
-                    // single pixel
-                } else if (cur !== top && cur !== bottom) {
-                    // check the color distance whether the top or bottom color is closer
-                    const topColorDistance = colorDistances[cur][top];
-                    const bottomColorDistance = colorDistances[cur][bottom];
-                    imgColorIndices.set(i, j, topColorDistance < bottomColorDistance ? top : bottom);
-                    count++;
-                } else if (cur !== left && cur !== right) {
-                    // check the color distance whether the top or bottom color is closer
-                    const leftColorDistance = colorDistances[cur][left];
-                    const rightColorDistance = colorDistances[cur][right];
-                    imgColorIndices.set(i, j, leftColorDistance < rightColorDistance ? left : right);
-                    count++;
-                }
-            }
+        // replace all pixels of the old color by the new centroid color
+        const pointColor = `${Math.floor(pointRGB[0])},${Math.floor(pointRGB[1])},${Math.floor(pointRGB[2])}`;
+        for (const pt of pointsByColor[pointColor]) {
+          const ptx = pt % imgData.width;
+          const pty = Math.floor(pt / imgData.width);
+          let dataOffset = (pty * imgData.width + ptx) * 4;
+          outputImgData.data[dataOffset++] = rgb[0];
+          outputImgData.data[dataOffset++] = rgb[1];
+          outputImgData.data[dataOffset++] = rgb[2];
         }
-        console.log(count + " pixels replaced to remove narrow pixel strips");
+      }
     }
+  }
+
+  /**
+   * Sorts the color palette by perceptual luminance (dark → light, i.e. low L* first)
+   * and remaps all pixel indices in imgColorIndices to match the new order.
+   * This gives stable, human-readable facet numbers where darker colors always
+   * get a lower index regardless of K-means initialisation order.
+   */
+  public static sortColorMapByLuminance(result: ColorMapResult): void {
+    // Build sorted order: pair each color with its original index, sort by L*
+    const indexed = result.colorsByIndex.map((rgb, i) => ({
+      i,
+      rgb,
+      l: rgb2lab(rgb)[0], // L* component (0 = black, 100 = white)
+    }));
+    indexed.sort((a, b) => a.l - b.l); // dark first
+
+    // Build old→new index remap
+    const remap = new Uint16Array(indexed.length);
+    indexed.forEach((entry, newIdx) => {
+      remap[entry.i] = newIdx;
+    });
+
+    // Reorder colorsByIndex in place
+    result.colorsByIndex = indexed.map((e) => e.rgb);
+
+    // Remap every pixel
+    for (let j = 0; j < result.height; j++) {
+      for (let i = 0; i < result.width; i++) {
+        result.imgColorIndices.set(
+          i,
+          j,
+          remap[result.imgColorIndices.get(i, j)],
+        );
+      }
+    }
+  }
+
+  /**
+   *  Builds a distance matrix for each color to each other
+   */
+  public static buildColorDistanceMatrix(colorsByIndex: RGB[]) {
+    const colorDistances: number[][] = new Array(colorsByIndex.length);
+    for (let j: number = 0; j < colorsByIndex.length; j++) {
+      colorDistances[j] = new Array(colorDistances.length);
+    }
+    for (let j: number = 0; j < colorsByIndex.length; j++) {
+      for (let i: number = j; i < colorsByIndex.length; i++) {
+        const c1 = colorsByIndex[j];
+        const c2 = colorsByIndex[i];
+        const distance = Math.sqrt(
+          (c1[0] - c2[0]) * (c1[0] - c2[0]) +
+            (c1[1] - c2[1]) * (c1[1] - c2[1]) +
+            (c1[2] - c2[2]) * (c1[2] - c2[2]),
+        );
+        colorDistances[i][j] = distance;
+        colorDistances[j][i] = distance;
+      }
+    }
+    return colorDistances;
+  }
+
+  public static async processNarrowPixelStripCleanup(
+    colormapResult: ColorMapResult,
+  ) {
+    // build the color distance matrix, which describes the distance of each color to each other
+    const colorDistances: number[][] = ColorReducer.buildColorDistanceMatrix(
+      colormapResult.colorsByIndex,
+    );
+
+    let count = 0;
+    const imgColorIndices = colormapResult.imgColorIndices;
+    for (let j: number = 1; j < colormapResult.height - 1; j++) {
+      for (let i: number = 1; i < colormapResult.width - 1; i++) {
+        const top = imgColorIndices.get(i, j - 1);
+        const bottom = imgColorIndices.get(i, j + 1);
+        const left = imgColorIndices.get(i - 1, j);
+        const right = imgColorIndices.get(i + 1, j);
+        const cur = imgColorIndices.get(i, j);
+        if (cur !== top && cur !== bottom && cur !== left && cur !== right) {
+          // single pixel
+        } else if (cur !== top && cur !== bottom) {
+          // check the color distance whether the top or bottom color is closer
+          const topColorDistance = colorDistances[cur][top];
+          const bottomColorDistance = colorDistances[cur][bottom];
+          imgColorIndices.set(
+            i,
+            j,
+            topColorDistance < bottomColorDistance ? top : bottom,
+          );
+          count++;
+        } else if (cur !== left && cur !== right) {
+          // check the color distance whether the top or bottom color is closer
+          const leftColorDistance = colorDistances[cur][left];
+          const rightColorDistance = colorDistances[cur][right];
+          imgColorIndices.set(
+            i,
+            j,
+            leftColorDistance < rightColorDistance ? left : right,
+          );
+          count++;
+        }
+      }
+    }
+    console.log(count + " pixels replaced to remove narrow pixel strips");
+  }
 }
