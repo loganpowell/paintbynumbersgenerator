@@ -105,7 +105,11 @@ export class ColorReducer {
     result.colorsByIndex = newColorsByIndex;
     for (let j = 0; j < result.height; j++) {
       for (let i = 0; i < result.width; i++) {
-        result.imgColorIndices.set(i, j, remap[result.imgColorIndices.get(i, j)]);
+        result.imgColorIndices.set(
+          i,
+          j,
+          remap[result.imgColorIndices.get(i, j)],
+        );
       }
     }
   }
