@@ -2,8 +2,14 @@
  * Module that provides function the GUI uses and updates the DOM accordingly
  */
 
-import { CancellationToken, IMap, RGB } from "./common";
-import { GUIProcessManager, ProcessResult } from "./guiprocessmanager";
+import { CancellationToken, delay, IMap, RGB } from "./common";
+import {
+  cachedFontBuffer,
+  cachedTTFDataUri,
+  ensureLabelFont,
+  GUIProcessManager,
+  ProcessResult,
+} from "./guiprocessmanager";
 import { ClusteringColorSpace, Settings } from "./settings";
 import { CRAYOLA_64, getCrayolaPaletteSorted } from "./lib/crayola";
 
@@ -150,45 +156,73 @@ export async function process() {
   }
 }
 
+let isUpdatingOutput = false;
+let pendingUpdate = false;
+
 export async function updateOutput() {
-  if (processResult != null) {
-    const showLabels = $("#chkShowLabels").prop("checked");
-    const fill = $("#chkFillFacets").prop("checked");
-    const stroke = $("#chkShowBorders").prop("checked");
+  if (processResult == null) return;
+  if (isUpdatingOutput) {
+    pendingUpdate = true;
+    return;
+  }
+  isUpdatingOutput = true;
+  try {
+    do {
+      pendingUpdate = false;
+      const showLabels = $("#chkShowLabels").prop("checked");
+      const fill = $("#chkFillFacets").prop("checked");
+      const stroke = $("#chkShowBorders").prop("checked");
 
-    const sizeMultiplier = parseInt($("#txtSizeMultiplier").val() + "");
-    const fontSize = parseInt($("#txtLabelFontSize").val() + "");
+      const sizeMultiplier = parseInt($("#txtSizeMultiplier").val() + "");
+      const fontSize = parseInt($("#txtLabelFontSize").val() + "");
+      const fontSizeMin = parseInt($("#txtLabelFontSizeMin").val() + "") || 6;
+      const fontSizeMax =
+        parseInt($("#txtLabelFontSizeMax").val() + "") || Infinity;
+      const labelFont = (
+        document.getElementById("selLabelFont") as HTMLSelectElement
+      ).value;
+      const fontColor = $("#txtLabelFontColor").val() + "";
 
-    const fontColor = $("#txtLabelFontColor").val() + "";
+      // Load/register the font before rendering so Chrome can apply it
+      const fontFamilyName = await ensureLabelFont(labelFont);
 
-    $("#statusSVGGenerate").css("width", "0%");
+      $("#statusSVGGenerate").css("width", "0%");
+      $(".status.SVGGenerate").removeClass("complete");
+      $(".status.SVGGenerate").addClass("active");
 
-    $(".status.SVGGenerate").removeClass("complete");
-    $(".status.SVGGenerate").addClass("active");
-
-    const svg = await GUIProcessManager.createSVG(
-      processResult.facetResult,
-      processResult.colorsByIndex,
-      sizeMultiplier,
-      fill,
-      stroke,
-      showLabels,
-      fontSize,
-      fontColor,
-      (progress) => {
-        if (cancellationToken.isCancelled) {
-          throw new Error("Cancelled");
-        }
-        $("#statusSVGGenerate").css("width", Math.round(progress * 100) + "%");
-      },
-    );
-    $("#svgContainer").empty().append(svg);
-    $("#palette")
-      .empty()
-      .append(createPaletteHtml(processResult.colorsByIndex));
-    ($("#palette .color") as any).tooltip();
-    $(".status").removeClass("active");
-    $(".status.SVGGenerate").addClass("complete");
+      const svg = await GUIProcessManager.createSVG(
+        processResult.facetResult,
+        processResult.colorsByIndex,
+        sizeMultiplier,
+        fill,
+        stroke,
+        showLabels,
+        fontSize,
+        fontColor,
+        fontSizeMin,
+        fontSizeMax,
+        labelFont,
+        fontFamilyName,
+        (progress) => {
+          if (cancellationToken.isCancelled) {
+            throw new Error("Cancelled");
+          }
+          $("#statusSVGGenerate").css(
+            "width",
+            Math.round(progress * 100) + "%",
+          );
+        },
+      );
+      $("#svgContainer").empty().append(svg);
+      $("#palette")
+        .empty()
+        .append(createPaletteHtml(processResult.colorsByIndex));
+      ($("#palette .color") as any).tooltip();
+      $(".status").removeClass("active");
+      $(".status.SVGGenerate").addClass("complete");
+    } while (pendingUpdate);
+  } finally {
+    isUpdatingOutput = false;
   }
 }
 
@@ -278,18 +312,113 @@ export function downloadPalettePng() {
   dl.click();
 }
 
-export function downloadPNG() {
+export async function downloadPNG() {
+  // Wait for any in-progress render, then force a fresh one with current settings
+  pendingUpdate = true;
+  while (isUpdatingOutput) await delay(50);
+  await updateOutput();
   if ($("#svgContainer svg").length > 0) {
     saveSvgAsPng($("#svgContainer svg").get(0) as Node, "paintbynumbers.png");
   }
 }
 
-export function downloadSVG() {
-  if ($("#svgContainer svg").length > 0) {
-    const svgEl = $("#svgContainer svg").get(0) as any;
+/**
+ * Replaces all <text> elements in svgEl with equivalent <path> elements using
+ * opentype.js glyph outlines. This makes the SVG fully self-contained and
+ * compatible with Inkscape / CNC software that can't embed or substitute fonts.
+ *
+ * Assumes opentype.js is loaded as a global (window.opentype).
+ */
+function textLabelsToPaths(svgEl: SVGSVGElement, fontBuffer: ArrayBuffer) {
+  const opentype = (window as any).opentype;
+  if (!opentype) {
+    console.warn("[font] opentype.js not available — skipping path conversion");
+    return;
+  }
 
+  const font = opentype.parse(fontBuffer);
+  const unitsPerEm: number = font.unitsPerEm;
+
+  // sCapHeight gives the height of capital letters in font design units.
+  // Fallback to ascender if the OS/2 table doesn't have it.
+  const capHeightUnits: number =
+    font.tables.os2?.sCapHeight || font.ascender || unitsPerEm * 0.7;
+
+  const xmlns = "http://www.w3.org/2000/svg";
+  const textEls = Array.from(
+    svgEl.querySelectorAll("text"),
+  ) as SVGTextElement[];
+
+  for (const textEl of textEls) {
+    const text = textEl.textContent ?? "";
+    if (!text) continue;
+
+    const cx = parseFloat(textEl.getAttribute("x") ?? "0");
+    const cy = parseFloat(textEl.getAttribute("y") ?? "0");
+    const fontSize = parseFloat(textEl.getAttribute("font-size") ?? "12");
+    const fill = textEl.getAttribute("fill") ?? "black";
+
+    // opentype positions glyphs with y at the baseline (bottom of cap height).
+    // Our SVG text uses text-anchor:middle + dominant-baseline:middle, so
+    // cx/cy is the visual centre of the label. Convert to opentype's origin:
+    //   • x: subtract half the total advance width  (centre → left-edge)
+    //   • y: add half the cap height in px          (centre → baseline)
+    const advanceWidth = font.getAdvanceWidth(text, fontSize);
+    const capHeightPx = (capHeightUnits / unitsPerEm) * fontSize;
+    const ox = cx - advanceWidth / 2;
+    const oy = cy + capHeightPx / 2;
+
+    const path = font.getPath(text, ox, oy, fontSize);
+    const pathData: string = path.toPathData(2);
+
+    const pathEl = document.createElementNS(xmlns, "path");
+    pathEl.setAttribute("d", pathData);
+    pathEl.setAttribute("fill", fill);
+    // Preserve any transform on the text element
+    const transform = textEl.getAttribute("transform");
+    if (transform) pathEl.setAttribute("transform", transform);
+
+    textEl.parentNode!.replaceChild(pathEl, textEl);
+  }
+}
+
+export async function downloadSVG() {
+  pendingUpdate = true;
+  while (isUpdatingOutput) await delay(50);
+  await updateOutput();
+  if ($("#svgContainer svg").length > 0) {
+    const svgEl = $("#svgContainer svg").get(0) as unknown as SVGSVGElement;
     svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const svgData = svgEl.outerHTML;
+
+    const labelFont = (
+      document.getElementById("selLabelFont") as HTMLSelectElement
+    ).value;
+    const renderAsPaths = (
+      document.getElementById("chkRenderLabelsAsPaths") as HTMLInputElement
+    ).checked;
+
+    if (labelFont === "ttf" && renderAsPaths && cachedFontBuffer) {
+      // Convert <text> nodes to <path> outlines — no font embedding needed
+      textLabelsToPaths(svgEl, cachedFontBuffer);
+    } else if (labelFont === "ttf" && cachedTTFDataUri) {
+      // Inject @font-face into <defs> so the downloaded SVG is self-contained
+      const xmlns = "http://www.w3.org/2000/svg";
+      const fontCss = `@font-face { font-family: 'CNCFont'; src: url('${cachedTTFDataUri}') format('truetype'); }`;
+      let defs = svgEl.querySelector("defs") as SVGDefsElement | null;
+      if (!defs) {
+        defs = document.createElementNS(xmlns, "defs") as SVGDefsElement;
+        svgEl.insertBefore(defs, svgEl.firstChild);
+      }
+      let styleEl = defs.querySelector("style") as SVGStyleElement | null;
+      if (!styleEl) {
+        styleEl = document.createElementNS(xmlns, "style") as SVGStyleElement;
+        styleEl.setAttribute("type", "text/css");
+        defs.appendChild(styleEl);
+      }
+      styleEl.textContent = fontCss;
+    }
+    const serializer = new XMLSerializer();
+    const svgData = serializer.serializeToString(svgEl);
     const preface = '<?xml version="1.0" standalone="no"?>\r\n';
     const svgBlob = new Blob([preface, svgData], {
       type: "image/svg+xml;charset=utf-8",

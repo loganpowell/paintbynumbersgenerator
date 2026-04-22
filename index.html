@@ -7,6 +7,8 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
     <link rel='stylesheet' href='styles/main.css' />
+    <!-- opentype.js: parse TTF in the browser for glyph-to-path conversion -->
+    <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
 </head>
 
 <body>
@@ -382,6 +384,47 @@
                             <label for="txtLabelFontColor">Label font color
                                 <i class="material-icons tooltipped"
                                     data-tooltip="Font color of the color number labels in each facet">info</i>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col s3">
+                        <div class="input-field">
+                            <input placeholder="Min label font size" id="txtLabelFontSizeMin" type="number" value="0" min="0">
+                            <label for="txtLabelFontSizeMin">Min label font size
+                                <i class="material-icons tooltipped"
+                                    data-tooltip="Minimum font size for labels — prevents tiny unreadable numbers in small facets. Set to 0 to disable.">info</i>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col s3">
+                        <div class="input-field">
+                            <input placeholder="Max label font size" id="txtLabelFontSizeMax" type="number" value="100" min="1">
+                            <label for="txtLabelFontSizeMax">Max label font size
+                                <i class="material-icons tooltipped"
+                                    data-tooltip="Maximum font size for labels — prevents oversized numbers in large facets. Set high to disable.">info</i>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col s3">
+                        <div class="input-field">
+                            <select id="selLabelFont">
+                                <option value="standard" selected>Standard (Tahoma)</option>
+                                <option value="ttf">Znikos (TTF, CNC-friendly)</option>
+                            </select>
+                            <label for="selLabelFont">Label font
+                                <i class="material-icons tooltipped"
+                                    data-tooltip="Single-stroke fonts (Hershey, EMS) draw each character as a single open path — ideal for CNC plotters and laser engravers">info</i>
+                            </label>
+                        </div>
+                        <div>
+                            <label>
+                                <input type="checkbox" id="chkRenderLabelsAsPaths" />
+                                <span>Render labels as paths on SVG export
+                                    <i class="material-icons tooltipped" style="font-size:16px;vertical-align:middle"
+                                        data-tooltip="When downloading SVG: converts text labels to filled outlines (no font needed). Required for Inkscape compatibility with the CNC font.">info</i>
+                                </span>
                             </label>
                         </div>
                     </div>

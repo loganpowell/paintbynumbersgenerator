@@ -2758,10 +2758,73 @@ define("facetLabelPlacer", ["require", "exports", "common", "lib/polylabel", "st
 define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "common", "facetBorderSegmenter", "facetBorderTracer", "facetCreator", "facetLabelPlacer", "facetmanagement", "facetReducer", "gui", "structs/point"], function (require, exports, colorreductionmanagement_2, common_7, facetBorderSegmenter_1, facetBorderTracer_1, facetCreator_3, facetLabelPlacer_1, facetmanagement_4, facetReducer_1, gui_1, point_5) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.GUIProcessManager = exports.ProcessResult = void 0;
+    exports.GUIProcessManager = exports.cachedFontBuffer = exports.cachedTTFDataUri = exports.ProcessResult = void 0;
+    exports.ensureLabelFont = ensureLabelFont;
     class ProcessResult {
     }
     exports.ProcessResult = ProcessResult;
+    // Cached TTF data URI (fetch once per page load) — exported so downloadSVG can embed it
+    exports.cachedTTFDataUri = null;
+    // Raw font buffer — exported so downloadSVG can convert text to paths via opentype.js
+    exports.cachedFontBuffer = null;
+    // Whether CNCFont has been successfully registered with document.fonts
+    let cncFontLoaded = false;
+    // The CSS font-family name currently active
+    let activeFontFamily = "Tahoma";
+    /**
+     * Loads and registers the selected label font for browser preview and SVG export.
+     * Call this once before createSVG whenever the font selection changes.
+     * Returns the CSS font-family name to use in SVG text elements.
+     */
+    function ensureLabelFont(labelFont) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (labelFont !== "ttf") {
+                activeFontFamily = "Tahoma";
+                return activeFontFamily;
+            }
+            activeFontFamily = "CNCFont";
+            // Only fetch + register once per page load
+            if (cncFontLoaded)
+                return activeFontFamily;
+            try {
+                if (!exports.cachedTTFDataUri) {
+                    console.log("[font] Fetching TTF...");
+                    const resp = yield fetch("fonts/Znikoslsvginot8-GOB3y.ttf");
+                    if (!resp.ok)
+                        throw new Error(`HTTP ${resp.status}`);
+                    const buffer = yield resp.arrayBuffer();
+                    exports.cachedFontBuffer = buffer; // keep raw buffer for opentype.js path conversion
+                    // Chunked conversion avoids call-stack overflow on large font files
+                    const bytes = new Uint8Array(buffer);
+                    const chunkSize = 0x8000;
+                    let binary = "";
+                    for (let i = 0; i < bytes.byteLength; i += chunkSize)
+                        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+                    exports.cachedTTFDataUri = `data:font/truetype;base64,${btoa(binary)}`;
+                    console.log(`[font] TTF cached (${bytes.byteLength} bytes)`);
+                }
+                // Register with FontFace API so Chrome renders it in inline SVG
+                const face = new FontFace(activeFontFamily, `url('${exports.cachedTTFDataUri}')`);
+                yield face.load();
+                document.fonts.add(face);
+                console.log("[font] FontFace registered:", activeFontFamily);
+                // Inject a <style> @font-face into <head> so exported SVG is self-contained
+                let headStyle = document.getElementById("cncFontFaceStyle");
+                if (!headStyle) {
+                    headStyle = document.createElement("style");
+                    headStyle.id = "cncFontFaceStyle";
+                    document.head.appendChild(headStyle);
+                }
+                headStyle.textContent = `@font-face { font-family: '${activeFontFamily}'; src: url('${exports.cachedTTFDataUri}') format('truetype'); }`;
+                cncFontLoaded = true;
+            }
+            catch (e) {
+                console.warn("[font] Could not load TTF font, falling back to Tahoma:", e);
+                activeFontFamily = "Tahoma";
+            }
+            return activeFontFamily;
+        });
+    }
     /**
      *  Manages the GUI states & processes the image step by step
      */
@@ -3029,11 +3092,15 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
          *  Creates a vector based SVG image of the facets with the given configuration
          */
         static createSVG(facetResult_1, colorsByIndex_1, sizeMultiplier_1, fill_2, stroke_1, addColorLabels_1) {
-            return __awaiter(this, arguments, void 0, function* (facetResult, colorsByIndex, sizeMultiplier, fill, stroke, addColorLabels, fontSize = 50, fontColor = "black", onUpdate = null) {
+            return __awaiter(this, arguments, void 0, function* (facetResult, colorsByIndex, sizeMultiplier, fill, stroke, addColorLabels, fontSize = 50, fontColor = "black", fontSizeMin = 6, fontSizeMax = 100, labelFont = "standard", fontFamilyName = "Tahoma", onUpdate = null) {
                 const xmlns = "http://www.w3.org/2000/svg";
                 const svg = document.createElementNS(xmlns, "svg");
                 svg.setAttribute("width", sizeMultiplier * facetResult.width + "");
                 svg.setAttribute("height", sizeMultiplier * facetResult.height + "");
+                // Note: @font-face is NOT embedded here — the FontFace API registration
+                // (done in ensureLabelFont) is sufficient for browser preview and avoids
+                // Chrome stalling on a re-parse of the embedded 386 KB data URI.
+                // For SVG export, downloadSVG() injects the <defs> block before serialising.
                 let count = 0;
                 for (const f of facetResult.facets) {
                     if (f != null && f.borderSegments.length > 0) {
@@ -3128,29 +3195,26 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                         // so I don't know why you would hide them
                         if (addColorLabels) {
                             const txt = document.createElementNS(xmlns, "text");
-                            txt.setAttribute("font-family", "Tahoma");
+                            txt.setAttribute("font-family", fontFamilyName);
                             const nrOfDigits = (f.color + "").length;
-                            txt.setAttribute("font-size", fontSize / nrOfDigits + "");
+                            // fontSize is a relative weight (0–100). Scale it against the
+                            // label bounding box so it's proportional to available space.
+                            const basePx = Math.min(f.labelBounds.width, f.labelBounds.height) *
+                                sizeMultiplier *
+                                (fontSize / 100);
+                            const computedFontSize = Math.min(fontSizeMax, Math.max(fontSizeMin, basePx / nrOfDigits));
+                            txt.setAttribute("font-size", computedFontSize + "");
                             txt.setAttribute("dominant-baseline", "middle");
                             txt.setAttribute("text-anchor", "middle");
                             txt.setAttribute("fill", fontColor);
                             txt.textContent = f.color + "";
-                            const subsvg = document.createElementNS(xmlns, "svg");
-                            subsvg.setAttribute("width", f.labelBounds.width * sizeMultiplier + "");
-                            subsvg.setAttribute("height", f.labelBounds.height * sizeMultiplier + "");
-                            subsvg.setAttribute("overflow", "visible");
-                            subsvg.setAttribute("viewBox", "-50 -50 100 100");
-                            subsvg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-                            subsvg.appendChild(txt);
-                            const g = document.createElementNS(xmlns, "g");
-                            g.setAttribute("class", "label");
-                            g.setAttribute("transform", "translate(" +
-                                f.labelBounds.minX * sizeMultiplier +
-                                "," +
-                                f.labelBounds.minY * sizeMultiplier +
-                                ")");
-                            g.appendChild(subsvg);
-                            svg.appendChild(g);
+                            // Position text at the center of the label bounds in absolute SVG pixels.
+                            // This avoids nested-SVG viewBox coordinate system differences between renderers.
+                            const cx = (f.labelBounds.minX + f.labelBounds.width / 2) * sizeMultiplier;
+                            const cy = (f.labelBounds.minY + f.labelBounds.height / 2) * sizeMultiplier;
+                            txt.setAttribute("x", cx + "");
+                            txt.setAttribute("y", cy + "");
+                            svg.appendChild(txt);
                         }
                         if (count % 100 === 0) {
                             yield (0, common_7.delay)(0);
@@ -3413,31 +3477,51 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
             }
         });
     }
+    let isUpdatingOutput = false;
+    let pendingUpdate = false;
     function updateOutput() {
         return __awaiter(this, void 0, void 0, function* () {
-            if (processResult != null) {
-                const showLabels = $("#chkShowLabels").prop("checked");
-                const fill = $("#chkFillFacets").prop("checked");
-                const stroke = $("#chkShowBorders").prop("checked");
-                const sizeMultiplier = parseInt($("#txtSizeMultiplier").val() + "");
-                const fontSize = parseInt($("#txtLabelFontSize").val() + "");
-                const fontColor = $("#txtLabelFontColor").val() + "";
-                $("#statusSVGGenerate").css("width", "0%");
-                $(".status.SVGGenerate").removeClass("complete");
-                $(".status.SVGGenerate").addClass("active");
-                const svg = yield guiprocessmanager_1.GUIProcessManager.createSVG(processResult.facetResult, processResult.colorsByIndex, sizeMultiplier, fill, stroke, showLabels, fontSize, fontColor, (progress) => {
-                    if (cancellationToken.isCancelled) {
-                        throw new Error("Cancelled");
-                    }
-                    $("#statusSVGGenerate").css("width", Math.round(progress * 100) + "%");
-                });
-                $("#svgContainer").empty().append(svg);
-                $("#palette")
-                    .empty()
-                    .append(createPaletteHtml(processResult.colorsByIndex));
-                $("#palette .color").tooltip();
-                $(".status").removeClass("active");
-                $(".status.SVGGenerate").addClass("complete");
+            if (processResult == null)
+                return;
+            if (isUpdatingOutput) {
+                pendingUpdate = true;
+                return;
+            }
+            isUpdatingOutput = true;
+            try {
+                do {
+                    pendingUpdate = false;
+                    const showLabels = $("#chkShowLabels").prop("checked");
+                    const fill = $("#chkFillFacets").prop("checked");
+                    const stroke = $("#chkShowBorders").prop("checked");
+                    const sizeMultiplier = parseInt($("#txtSizeMultiplier").val() + "");
+                    const fontSize = parseInt($("#txtLabelFontSize").val() + "");
+                    const fontSizeMin = parseInt($("#txtLabelFontSizeMin").val() + "") || 6;
+                    const fontSizeMax = parseInt($("#txtLabelFontSizeMax").val() + "") || Infinity;
+                    const labelFont = document.getElementById("selLabelFont").value;
+                    const fontColor = $("#txtLabelFontColor").val() + "";
+                    // Load/register the font before rendering so Chrome can apply it
+                    const fontFamilyName = yield (0, guiprocessmanager_1.ensureLabelFont)(labelFont);
+                    $("#statusSVGGenerate").css("width", "0%");
+                    $(".status.SVGGenerate").removeClass("complete");
+                    $(".status.SVGGenerate").addClass("active");
+                    const svg = yield guiprocessmanager_1.GUIProcessManager.createSVG(processResult.facetResult, processResult.colorsByIndex, sizeMultiplier, fill, stroke, showLabels, fontSize, fontColor, fontSizeMin, fontSizeMax, labelFont, fontFamilyName, (progress) => {
+                        if (cancellationToken.isCancelled) {
+                            throw new Error("Cancelled");
+                        }
+                        $("#statusSVGGenerate").css("width", Math.round(progress * 100) + "%");
+                    });
+                    $("#svgContainer").empty().append(svg);
+                    $("#palette")
+                        .empty()
+                        .append(createPaletteHtml(processResult.colorsByIndex));
+                    $("#palette .color").tooltip();
+                    $(".status").removeClass("active");
+                    $(".status.SVGGenerate").addClass("complete");
+                } while (pendingUpdate);
+            }
+            finally {
+                isUpdatingOutput = false;
             }
         });
     }
@@ -3503,36 +3587,123 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
         dl.click();
     }
     function downloadPNG() {
-        if ($("#svgContainer svg").length > 0) {
-            saveSvgAsPng($("#svgContainer svg").get(0), "paintbynumbers.png");
+        return __awaiter(this, void 0, void 0, function* () {
+            // Wait for any in-progress render, then force a fresh one with current settings
+            pendingUpdate = true;
+            while (isUpdatingOutput)
+                yield (0, common_8.delay)(50);
+            yield updateOutput();
+            if ($("#svgContainer svg").length > 0) {
+                saveSvgAsPng($("#svgContainer svg").get(0), "paintbynumbers.png");
+            }
+        });
+    }
+    /**
+     * Replaces all <text> elements in svgEl with equivalent <path> elements using
+     * opentype.js glyph outlines. This makes the SVG fully self-contained and
+     * compatible with Inkscape / CNC software that can't embed or substitute fonts.
+     *
+     * Assumes opentype.js is loaded as a global (window.opentype).
+     */
+    function textLabelsToPaths(svgEl, fontBuffer) {
+        var _a, _b, _c, _d, _e, _f;
+        const opentype = window.opentype;
+        if (!opentype) {
+            console.warn("[font] opentype.js not available — skipping path conversion");
+            return;
+        }
+        const font = opentype.parse(fontBuffer);
+        const unitsPerEm = font.unitsPerEm;
+        // sCapHeight gives the height of capital letters in font design units.
+        // Fallback to ascender if the OS/2 table doesn't have it.
+        const capHeightUnits = ((_a = font.tables.os2) === null || _a === void 0 ? void 0 : _a.sCapHeight) || font.ascender || unitsPerEm * 0.7;
+        const xmlns = "http://www.w3.org/2000/svg";
+        const textEls = Array.from(svgEl.querySelectorAll("text"));
+        for (const textEl of textEls) {
+            const text = (_b = textEl.textContent) !== null && _b !== void 0 ? _b : "";
+            if (!text)
+                continue;
+            const cx = parseFloat((_c = textEl.getAttribute("x")) !== null && _c !== void 0 ? _c : "0");
+            const cy = parseFloat((_d = textEl.getAttribute("y")) !== null && _d !== void 0 ? _d : "0");
+            const fontSize = parseFloat((_e = textEl.getAttribute("font-size")) !== null && _e !== void 0 ? _e : "12");
+            const fill = (_f = textEl.getAttribute("fill")) !== null && _f !== void 0 ? _f : "black";
+            // opentype positions glyphs with y at the baseline (bottom of cap height).
+            // Our SVG text uses text-anchor:middle + dominant-baseline:middle, so
+            // cx/cy is the visual centre of the label. Convert to opentype's origin:
+            //   • x: subtract half the total advance width  (centre → left-edge)
+            //   • y: add half the cap height in px          (centre → baseline)
+            const advanceWidth = font.getAdvanceWidth(text, fontSize);
+            const capHeightPx = (capHeightUnits / unitsPerEm) * fontSize;
+            const ox = cx - advanceWidth / 2;
+            const oy = cy + capHeightPx / 2;
+            const path = font.getPath(text, ox, oy, fontSize);
+            const pathData = path.toPathData(2);
+            const pathEl = document.createElementNS(xmlns, "path");
+            pathEl.setAttribute("d", pathData);
+            pathEl.setAttribute("fill", fill);
+            // Preserve any transform on the text element
+            const transform = textEl.getAttribute("transform");
+            if (transform)
+                pathEl.setAttribute("transform", transform);
+            textEl.parentNode.replaceChild(pathEl, textEl);
         }
     }
     function downloadSVG() {
-        if ($("#svgContainer svg").length > 0) {
-            const svgEl = $("#svgContainer svg").get(0);
-            svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-            const svgData = svgEl.outerHTML;
-            const preface = '<?xml version="1.0" standalone="no"?>\r\n';
-            const svgBlob = new Blob([preface, svgData], {
-                type: "image/svg+xml;charset=utf-8",
-            });
-            const svgUrl = URL.createObjectURL(svgBlob);
-            const downloadLink = document.createElement("a");
-            downloadLink.href = svgUrl;
-            downloadLink.download = "paintbynumbers.svg";
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-            /*
-                var svgAsXML = (new XMLSerializer).serializeToString(<any>$("#svgContainer svg").get(0));
-                let dataURL = "data:image/svg+xml," + encodeURIComponent(svgAsXML);
-                var dl = document.createElement("a");
-                document.body.appendChild(dl);
-                dl.setAttribute("href", dataURL);
-                dl.setAttribute("download", "paintbynumbers.svg");
-                dl.click();
-                */
-        }
+        return __awaiter(this, void 0, void 0, function* () {
+            pendingUpdate = true;
+            while (isUpdatingOutput)
+                yield (0, common_8.delay)(50);
+            yield updateOutput();
+            if ($("#svgContainer svg").length > 0) {
+                const svgEl = $("#svgContainer svg").get(0);
+                svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+                const labelFont = document.getElementById("selLabelFont").value;
+                const renderAsPaths = document.getElementById("chkRenderLabelsAsPaths").checked;
+                if (labelFont === "ttf" && renderAsPaths && guiprocessmanager_1.cachedFontBuffer) {
+                    // Convert <text> nodes to <path> outlines — no font embedding needed
+                    textLabelsToPaths(svgEl, guiprocessmanager_1.cachedFontBuffer);
+                }
+                else if (labelFont === "ttf" && guiprocessmanager_1.cachedTTFDataUri) {
+                    // Inject @font-face into <defs> so the downloaded SVG is self-contained
+                    const xmlns = "http://www.w3.org/2000/svg";
+                    const fontCss = `@font-face { font-family: 'CNCFont'; src: url('${guiprocessmanager_1.cachedTTFDataUri}') format('truetype'); }`;
+                    let defs = svgEl.querySelector("defs");
+                    if (!defs) {
+                        defs = document.createElementNS(xmlns, "defs");
+                        svgEl.insertBefore(defs, svgEl.firstChild);
+                    }
+                    let styleEl = defs.querySelector("style");
+                    if (!styleEl) {
+                        styleEl = document.createElementNS(xmlns, "style");
+                        styleEl.setAttribute("type", "text/css");
+                        defs.appendChild(styleEl);
+                    }
+                    styleEl.textContent = fontCss;
+                }
+                const serializer = new XMLSerializer();
+                const svgData = serializer.serializeToString(svgEl);
+                const preface = '<?xml version="1.0" standalone="no"?>\r\n';
+                const svgBlob = new Blob([preface, svgData], {
+                    type: "image/svg+xml;charset=utf-8",
+                });
+                const svgUrl = URL.createObjectURL(svgBlob);
+                const downloadLink = document.createElement("a");
+                downloadLink.href = svgUrl;
+                downloadLink.download = "paintbynumbers.svg";
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+                /*
+                    var svgAsXML = (new XMLSerializer).serializeToString(<any>$("#svgContainer svg").get(0));
+                    let dataURL = "data:image/svg+xml," + encodeURIComponent(svgAsXML);
+                    var dl = document.createElement("a");
+                    document.body.appendChild(dl);
+                    dl.setAttribute("href", dataURL);
+                    dl.setAttribute("download", "paintbynumbers.svg");
+                    dl.click();
+                    */
+            }
+        });
     }
     function loadExample(imgId) {
         // load image
@@ -3698,6 +3869,7 @@ define("main", ["require", "exports", "gui", "lib/clipboard"], function (require
     $(document).ready(function () {
         $(".tabs").tabs();
         $(".tooltipped").tooltip();
+        M.FormSelect.init(document.querySelectorAll("select"));
         const clip = new clipboard_1.Clipboard("canvas", true);
         $("#file").change(function (ev) {
             const files = $("#file").get(0).files;
@@ -3731,7 +3903,13 @@ define("main", ["require", "exports", "gui", "lib/clipboard"], function (require
                 }
             });
         });
-        $("#chkShowLabels, #chkFillFacets, #chkShowBorders, #txtSizeMultiplier, #txtLabelFontSize, #txtLabelFontColor").change(() => __awaiter(this, void 0, void 0, function* () {
+        $("#chkShowLabels, #chkFillFacets, #chkShowBorders, #txtSizeMultiplier, #txtLabelFontSize, #txtLabelFontColor, #txtLabelFontSizeMin, #txtLabelFontSizeMax").change(() => __awaiter(this, void 0, void 0, function* () {
+            yield (0, gui_2.updateOutput)();
+        }));
+        // Materialize wraps <select> — listen on the native element directly
+        document
+            .getElementById("selLabelFont")
+            .addEventListener("change", () => __awaiter(this, void 0, void 0, function* () {
             yield (0, gui_2.updateOutput)();
         }));
         $("#btnDownloadSVG").click(function () {
