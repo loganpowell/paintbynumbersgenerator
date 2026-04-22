@@ -3584,7 +3584,7 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
                 const strokeColor = (_e = textEl.getAttribute("fill")) !== null && _e !== void 0 ? _e : "black";
                 // Stroke width scales with font size: ~8% of em gives good weight at all
                 // label sizes without obscuring the numeral. Floor at 0.5px for tiny facets.
-                const strokeWidth = Math.max(3, fontSize);
+                const strokeWidth = Math.max(1.5, fontSize * 0.24);
                 // Compute total advance width in SVG pixels so we can centre the string
                 let totalAdvance = 0;
                 for (const ch of text) {
@@ -3862,12 +3862,6 @@ define("main", ["require", "exports", "gui", "lib/clipboard"], function (require
             });
         });
         $("#chkShowLabels, #chkFillFacets, #chkShowBorders, #txtSizeMultiplier, #txtLabelFontSize, #txtLabelFontColor, #txtLabelFontSizeMin, #txtLabelFontSizeMax").change(() => __awaiter(this, void 0, void 0, function* () {
-            yield (0, gui_2.updateOutput)();
-        }));
-        // Materialize wraps <select> — listen on the native element directly
-        document
-            .getElementById("selLabelFont")
-            .addEventListener("change", () => __awaiter(this, void 0, void 0, function* () {
             yield (0, gui_2.updateOutput)();
         }));
         $("#btnDownloadSVG").click(function () {
