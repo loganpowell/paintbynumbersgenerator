@@ -12,6 +12,7 @@ import { Clipboard } from "./lib/clipboard";
 $(document).ready(function () {
   $(".tabs").tabs();
   $(".tooltipped").tooltip();
+  M.FormSelect.init(document.querySelectorAll("select"));
 
   const clip = new Clipboard("canvas", true);
 
@@ -48,10 +49,17 @@ $(document).ready(function () {
   });
 
   $(
-    "#chkShowLabels, #chkFillFacets, #chkShowBorders, #txtSizeMultiplier, #txtLabelFontSize, #txtLabelFontColor",
+    "#chkShowLabels, #chkFillFacets, #chkShowBorders, #txtSizeMultiplier, #txtLabelFontSize, #txtLabelFontColor, #txtLabelFontSizeMin, #txtLabelFontSizeMax",
   ).change(async () => {
     await updateOutput();
   });
+
+  // Materialize wraps <select> — listen on the native element directly
+  document
+    .getElementById("selLabelFont")!
+    .addEventListener("change", async () => {
+      await updateOutput();
+    });
 
   $("#btnDownloadSVG").click(function () {
     downloadSVG();
