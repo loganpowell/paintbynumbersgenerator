@@ -421,6 +421,36 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
             return result;
         }
         /**
+         *  Removes colors from colorsByIndex that are not referenced by any pixel.
+         *  This can happen when restriction colors are pre-seeded but the K-means
+         *  clustering never mapped any pixel to that color.
+         *  Remaps imgColorIndices to use the new compact indices.
+         */
+        static pruneUnusedColors(result) {
+            const used = new Set();
+            for (let j = 0; j < result.height; j++) {
+                for (let i = 0; i < result.width; i++) {
+                    used.add(result.imgColorIndices.get(i, j));
+                }
+            }
+            if (used.size === result.colorsByIndex.length)
+                return; // nothing to prune
+            const remap = new Int32Array(result.colorsByIndex.length).fill(-1);
+            const newColorsByIndex = [];
+            for (let oldIdx = 0; oldIdx < result.colorsByIndex.length; oldIdx++) {
+                if (used.has(oldIdx)) {
+                    remap[oldIdx] = newColorsByIndex.length;
+                    newColorsByIndex.push(result.colorsByIndex[oldIdx]);
+                }
+            }
+            result.colorsByIndex = newColorsByIndex;
+            for (let j = 0; j < result.height; j++) {
+                for (let i = 0; i < result.width; i++) {
+                    result.imgColorIndices.set(i, j, remap[result.imgColorIndices.get(i, j)]);
+                }
+            }
+        }
+        /**
          *  Applies K-means clustering on the imgData to reduce the colors to
          *  k clusters and then output the result to the given outputImgData
          */
@@ -440,9 +470,9 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
                         const a = imgData.data[idx++];
                         // small performance boost: reduce bitness of colors by chopping off the last bits
                         // this will group more colors with only slight variation in color together, reducing the size of the points
-                        r = r >> bitsToChopOff << bitsToChopOff;
-                        g = g >> bitsToChopOff << bitsToChopOff;
-                        b = b >> bitsToChopOff << bitsToChopOff;
+                        r = (r >> bitsToChopOff) << bitsToChopOff;
+                        g = (g >> bitsToChopOff) << bitsToChopOff;
+                        b = (b >> bitsToChopOff) << bitsToChopOff;
                         const color = `${r},${g},${b}`;
                         if (!(color in pointsByColor)) {
                             pointsByColor[color] = [j * imgData.width + i];
@@ -524,7 +554,7 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
                         rgb = centroid.values;
                     }
                     // remove decimals
-                    rgb = rgb.map(v => Math.floor(v));
+                    rgb = rgb.map((v) => Math.floor(v));
                     if (restrictToSpecifiedColors) {
                         if (settings.kMeansColorRestrictions.length > 0) {
                             // there are color restrictions, for each centroid find the color from the color restrictions that's the closest
@@ -540,9 +570,12 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
                                 else {
                                     restrictionLab = (0, colorconversion_1.rgb2lab)(color);
                                 }
-                                const distance = Math.sqrt((centroidLab[0] - restrictionLab[0]) * (centroidLab[0] - restrictionLab[0]) +
-                                    (centroidLab[1] - restrictionLab[1]) * (centroidLab[1] - restrictionLab[1]) +
-                                    (centroidLab[2] - restrictionLab[2]) * (centroidLab[2] - restrictionLab[2]));
+                                const distance = Math.sqrt((centroidLab[0] - restrictionLab[0]) *
+                                    (centroidLab[0] - restrictionLab[0]) +
+                                    (centroidLab[1] - restrictionLab[1]) *
+                                        (centroidLab[1] - restrictionLab[1]) +
+                                    (centroidLab[2] - restrictionLab[2]) *
+                                        (centroidLab[2] - restrictionLab[2]));
                                 if (distance < minDistance) {
                                     minDistance = distance;
                                     closestRestrictedColor = color;
@@ -589,9 +622,11 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
             indexed.sort((a, b) => a.l - b.l); // dark first
             // Build old→new index remap
             const remap = new Uint16Array(indexed.length);
-            indexed.forEach((entry, newIdx) => { remap[entry.i] = newIdx; });
+            indexed.forEach((entry, newIdx) => {
+                remap[entry.i] = newIdx;
+            });
             // Reorder colorsByIndex in place
-            result.colorsByIndex = indexed.map(e => e.rgb);
+            result.colorsByIndex = indexed.map((e) => e.rgb);
             // Remap every pixel
             for (let j = 0; j < result.height; j++) {
                 for (let i = 0; i < result.width; i++) {
@@ -2736,18 +2771,20 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                 const c = document.getElementById("canvas");
                 const ctx = c.getContext("2d");
                 let imgData = ctx.getImageData(0, 0, c.width, c.height);
-                if (settings.resizeImageIfTooLarge && (c.width > settings.resizeImageWidth || c.height > settings.resizeImageHeight)) {
+                if (settings.resizeImageIfTooLarge &&
+                    (c.width > settings.resizeImageWidth ||
+                        c.height > settings.resizeImageHeight)) {
                     let width = c.width;
                     let height = c.height;
                     if (width > settings.resizeImageWidth) {
                         const newWidth = settings.resizeImageWidth;
-                        const newHeight = c.height / c.width * settings.resizeImageWidth;
+                        const newHeight = (c.height / c.width) * settings.resizeImageWidth;
                         width = newWidth;
                         height = newHeight;
                     }
                     if (height > settings.resizeImageHeight) {
                         const newHeight = settings.resizeImageHeight;
-                        const newWidth = width / height * newHeight;
+                        const newWidth = (width / height) * newHeight;
                         width = newWidth;
                         height = newHeight;
                     }
@@ -2770,6 +2807,8 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                 let colormapResult = new colorreductionmanagement_2.ColorMapResult();
                 // build color map
                 colormapResult = colorreductionmanagement_2.ColorReducer.createColorMap(kmeansImgData, settings);
+                // remove any pre-seeded restriction colors not present in the image
+                colorreductionmanagement_2.ColorReducer.pruneUnusedColors(colormapResult);
                 // optionally sort palette by luminance so facet numbers are stable and
                 // human-readable (darker colors → lower index)
                 if (settings.sortPaletteByLuminance) {
@@ -2818,7 +2857,11 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                 tabsOutput.select("kmeans-pane");
                 $(".status.kMeans").addClass("active");
                 yield colorreductionmanagement_2.ColorReducer.applyKMeansClustering(imgData, kmeansImgData, ctx, settings, (kmeans) => {
-                    const progress = (100 - (kmeans.currentDeltaDistanceDifference > 100 ? 100 : kmeans.currentDeltaDistanceDifference)) / 100;
+                    const progress = (100 -
+                        (kmeans.currentDeltaDistanceDifference > 100
+                            ? 100
+                            : kmeans.currentDeltaDistanceDifference)) /
+                        100;
                     $("#statusKMeans").css("width", Math.round(progress * 100) + "%");
                     ctxKmeans.putImageData(kmeansImgData, 0, 0);
                     console.log(kmeans.currentDeltaDistanceDifference);
@@ -3000,27 +3043,41 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                             newpath = f.getFullPathFromBorderSegments(false);
                             // shift from wall coordinates to pixel centers
                             /*for (const p of newpath) {
-                                p.x+=0.5;
-                                p.y+=0.5;
-                            }*/
+                                          p.x+=0.5;
+                                          p.y+=0.5;
+                                      }*/
                         }
                         else {
                             for (let i = 0; i < f.borderPath.length; i++) {
                                 newpath.push(new point_5.Point(f.borderPath[i].getWallX() + 0.5, f.borderPath[i].getWallY() + 0.5));
                             }
                         }
-                        if (newpath[0].x !== newpath[newpath.length - 1].x || newpath[0].y !== newpath[newpath.length - 1].y) {
+                        if (newpath[0].x !== newpath[newpath.length - 1].x ||
+                            newpath[0].y !== newpath[newpath.length - 1].y) {
                             newpath.push(newpath[0]);
                         } // close loop if necessary
                         // Create a path in SVG's namespace
                         // using quadratic curve absolute positions
                         const svgPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
                         let data = "M ";
-                        data += newpath[0].x * sizeMultiplier + " " + newpath[0].y * sizeMultiplier + " ";
+                        data +=
+                            newpath[0].x * sizeMultiplier +
+                                " " +
+                                newpath[0].y * sizeMultiplier +
+                                " ";
                         for (let i = 1; i < newpath.length; i++) {
                             const midpointX = (newpath[i].x + newpath[i - 1].x) / 2;
                             const midpointY = (newpath[i].y + newpath[i - 1].y) / 2;
-                            data += "Q " + (midpointX * sizeMultiplier) + " " + (midpointY * sizeMultiplier) + " " + (newpath[i].x * sizeMultiplier) + " " + (newpath[i].y * sizeMultiplier) + " ";
+                            data +=
+                                "Q " +
+                                    midpointX * sizeMultiplier +
+                                    " " +
+                                    midpointY * sizeMultiplier +
+                                    " " +
+                                    newpath[i].x * sizeMultiplier +
+                                    " " +
+                                    newpath[i].y * sizeMultiplier +
+                                    " ";
                             // data += "L " + (newpath[i].x * sizeMultiplier) + " " + (newpath[i].y * sizeMultiplier) + " ";
                         }
                         data += "Z";
@@ -3046,34 +3103,34 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                         }
                         svg.appendChild(svgPath);
                         /*  for (const seg of f.borderSegments) {
-                              const svgSegPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                              let segData = "M ";
-                              const segPoints = seg.originalSegment.points;
-                              segData += segPoints[0].x * sizeMultiplier + " " + segPoints[0].y * sizeMultiplier + " ";
-                              for (let i: number = 1; i < segPoints.length; i++) {
-                                  const midpointX = (segPoints[i].x + segPoints[i - 1].x) / 2;
-                                  const midpointY = (segPoints[i].y + segPoints[i - 1].y) / 2;
-                                  //data += "Q " + (midpointX * sizeMultiplier) + " " + (midpointY * sizeMultiplier) + " " + (newpath[i].x * sizeMultiplier) + " " + (newpath[i].y * sizeMultiplier) + " ";
-                                  segData += "L " + (segPoints[i].x * sizeMultiplier) + " " + (segPoints[i].y * sizeMultiplier) + " ";
-                              }
-        
-                              console.log("Facet " + f.id + ", segment " + segPoints[0].x + "," + segPoints[0].y + " -> " + segPoints[segPoints.length-1].x + "," +  segPoints[segPoints.length-1].y);
-        
-                              svgSegPath.setAttribute("data-segmentFacet", f.id + "");
-                              // Set path's data
-                              svgSegPath.setAttribute("d", segData);
-                              svgSegPath.style.stroke = "#FF0";
-                              svgSegPath.style.fill = "none";
-                              svg.appendChild(svgSegPath);
-                          }
-                          */
+                                      const svgSegPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                      let segData = "M ";
+                                      const segPoints = seg.originalSegment.points;
+                                      segData += segPoints[0].x * sizeMultiplier + " " + segPoints[0].y * sizeMultiplier + " ";
+                                      for (let i: number = 1; i < segPoints.length; i++) {
+                                          const midpointX = (segPoints[i].x + segPoints[i - 1].x) / 2;
+                                          const midpointY = (segPoints[i].y + segPoints[i - 1].y) / 2;
+                                          //data += "Q " + (midpointX * sizeMultiplier) + " " + (midpointY * sizeMultiplier) + " " + (newpath[i].x * sizeMultiplier) + " " + (newpath[i].y * sizeMultiplier) + " ";
+                                          segData += "L " + (segPoints[i].x * sizeMultiplier) + " " + (segPoints[i].y * sizeMultiplier) + " ";
+                                      }
+                
+                                      console.log("Facet " + f.id + ", segment " + segPoints[0].x + "," + segPoints[0].y + " -> " + segPoints[segPoints.length-1].x + "," +  segPoints[segPoints.length-1].y);
+                
+                                      svgSegPath.setAttribute("data-segmentFacet", f.id + "");
+                                      // Set path's data
+                                      svgSegPath.setAttribute("d", segData);
+                                      svgSegPath.style.stroke = "#FF0";
+                                      svgSegPath.style.fill = "none";
+                                      svg.appendChild(svgSegPath);
+                                  }
+                                  */
                         // add the color labels if necessary. I mean, this is the whole idea behind the paint by numbers part
                         // so I don't know why you would hide them
                         if (addColorLabels) {
                             const txt = document.createElementNS(xmlns, "text");
                             txt.setAttribute("font-family", "Tahoma");
                             const nrOfDigits = (f.color + "").length;
-                            txt.setAttribute("font-size", (fontSize / nrOfDigits) + "");
+                            txt.setAttribute("font-size", fontSize / nrOfDigits + "");
                             txt.setAttribute("dominant-baseline", "middle");
                             txt.setAttribute("text-anchor", "middle");
                             txt.setAttribute("fill", fontColor);
@@ -3087,7 +3144,11 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                             subsvg.appendChild(txt);
                             const g = document.createElementNS(xmlns, "g");
                             g.setAttribute("class", "label");
-                            g.setAttribute("transform", "translate(" + f.labelBounds.minX * sizeMultiplier + "," + f.labelBounds.minY * sizeMultiplier + ")");
+                            g.setAttribute("transform", "translate(" +
+                                f.labelBounds.minX * sizeMultiplier +
+                                "," +
+                                f.labelBounds.minY * sizeMultiplier +
+                                ")");
                             g.appendChild(subsvg);
                             svg.appendChild(g);
                         }

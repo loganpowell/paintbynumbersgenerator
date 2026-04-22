@@ -84,6 +84,9 @@ export class GUIProcessManager {
     // build color map
     colormapResult = ColorReducer.createColorMap(kmeansImgData, settings);
 
+    // remove any pre-seeded restriction colors not present in the image
+    ColorReducer.pruneUnusedColors(colormapResult);
+
     // optionally sort palette by luminance so facet numbers are stable and
     // human-readable (darker colors → lower index)
     if (settings.sortPaletteByLuminance) {

@@ -80,6 +80,37 @@ export class ColorReducer {
   }
 
   /**
+   *  Removes colors from colorsByIndex that are not referenced by any pixel.
+   *  This can happen when restriction colors are pre-seeded but the K-means
+   *  clustering never mapped any pixel to that color.
+   *  Remaps imgColorIndices to use the new compact indices.
+   */
+  public static pruneUnusedColors(result: ColorMapResult): void {
+    const used = new Set<number>();
+    for (let j = 0; j < result.height; j++) {
+      for (let i = 0; i < result.width; i++) {
+        used.add(result.imgColorIndices.get(i, j));
+      }
+    }
+    if (used.size === result.colorsByIndex.length) return; // nothing to prune
+
+    const remap = new Int32Array(result.colorsByIndex.length).fill(-1);
+    const newColorsByIndex: RGB[] = [];
+    for (let oldIdx = 0; oldIdx < result.colorsByIndex.length; oldIdx++) {
+      if (used.has(oldIdx)) {
+        remap[oldIdx] = newColorsByIndex.length;
+        newColorsByIndex.push(result.colorsByIndex[oldIdx]);
+      }
+    }
+    result.colorsByIndex = newColorsByIndex;
+    for (let j = 0; j < result.height; j++) {
+      for (let i = 0; i < result.width; i++) {
+        result.imgColorIndices.set(i, j, remap[result.imgColorIndices.get(i, j)]);
+      }
+    }
+  }
+
+  /**
    *  Applies K-means clustering on the imgData to reduce the colors to
    *  k clusters and then output the result to the given outputImgData
    */
