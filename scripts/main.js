@@ -363,13 +363,34 @@ define("colorreductionmanagement", ["require", "exports", "common", "lib/cluster
     exports.ColorMapResult = ColorMapResult;
     class ColorReducer {
         /**
-         *  Creates a map of the various colors used
+         *  Creates a map of the various colors used.
+         *  When settings are provided and kMeansColorRestrictions is non-empty the
+         *  restriction colors are pre-seeded into the map (in input order) so that
+         *  their indices are stable across runs regardless of K-means randomness.
          */
-        static createColorMap(kmeansImgData) {
+        static createColorMap(kmeansImgData, settings) {
             const imgColorIndices = new typedarrays_1.Uint8Array2D(kmeansImgData.width, kmeansImgData.height);
             let colorIndex = 0;
             const colors = {};
             const colorsByIndex = [];
+            // Pre-seed restriction colors so they always receive the same stable index
+            if (settings && settings.kMeansColorRestrictions.length > 0) {
+                for (const restriction of settings.kMeansColorRestrictions) {
+                    let rgb;
+                    if (typeof restriction === "string") {
+                        rgb = settings.colorAliases[restriction];
+                    }
+                    else {
+                        rgb = restriction;
+                    }
+                    const key = rgb[0] + "," + rgb[1] + "," + rgb[2];
+                    if (typeof colors[key] === "undefined") {
+                        colors[key] = colorIndex;
+                        colorsByIndex.push(rgb);
+                        colorIndex++;
+                    }
+                }
+            }
             let idx = 0;
             for (let j = 0; j < kmeansImgData.height; j++) {
                 for (let i = 0; i < kmeansImgData.width; i++) {
@@ -2721,7 +2742,7 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                 let facetResult = new facetmanagement_4.FacetResult();
                 let colormapResult = new colorreductionmanagement_2.ColorMapResult();
                 // build color map
-                colormapResult = colorreductionmanagement_2.ColorReducer.createColorMap(kmeansImgData);
+                colormapResult = colorreductionmanagement_2.ColorReducer.createColorMap(kmeansImgData, settings);
                 if (settings.narrowPixelStripCleanupRuns === 0) {
                     // facet building
                     facetResult = yield GUIProcessManager.processFacetBuilding(colormapResult, cancellationToken);
@@ -3201,7 +3222,10 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings", 
             .map(([name, [r, g, b]]) => `<span title="${name}" style="display:inline-block;width:14px;height:14px;margin:1px;border-radius:2px;background:rgb(${r},${g},${b});border:1px solid rgba(0,0,0,0.15)"></span>`)
             .join("");
         $("#crayolaSwatches").html(swatchHtml).fadeIn(200);
-        M.toast({ html: `Loaded ${lines.length} Crayola colors`, displayLength: 2000 });
+        M.toast({
+            html: `Loaded ${lines.length} Crayola colors`,
+            displayLength: 2000,
+        });
     }
     let processResult = null;
     let cancellationToken = new common_8.CancellationToken();
@@ -3628,8 +3652,17 @@ define("main", ["require", "exports", "gui", "lib/clipboard"], function (require
         $("#btnDownloadPalettePNG").click(function () {
             (0, gui_2.downloadPalettePng)();
         });
-        $("#lnkTrivial").click(() => { (0, gui_2.loadExample)("imgTrivial"); return false; });
-        $("#lnkSmall").click(() => { (0, gui_2.loadExample)("imgSmall"); return false; });
-        $("#lnkMedium").click(() => { (0, gui_2.loadExample)("imgMedium"); return false; });
+        $("#lnkTrivial").click(() => {
+            (0, gui_2.loadExample)("imgTrivial");
+            return false;
+        });
+        $("#lnkSmall").click(() => {
+            (0, gui_2.loadExample)("imgSmall");
+            return false;
+        });
+        $("#lnkMedium").click(() => {
+            (0, gui_2.loadExample)("imgMedium");
+            return false;
+        });
     });
 });
